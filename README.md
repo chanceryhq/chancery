@@ -1,4 +1,4 @@
-# Chancery (working codename)
+# Chancery
 
 **The identity provider for AI agents** — the neutral, self-hosted system
 of record for what every agent is, who it acts for, what it can do, and
@@ -21,7 +21,7 @@ Design happens as a series of locked decisions, one RFC at a time
 | RFC | Title | Status |
 |-----|-------|--------|
 | [000](rfcs/000-vision-and-plan.md) | Vision and plan | In Review |
-| 001 | Agent identity model | — |
+| [001](rfcs/001-agent-identity-model.md) | Agent identity model | In Review |
 | 002 | Lineage and delegation | — |
 | 003 | Credential broker | — |
 | 004 | Policy and authorization | — |

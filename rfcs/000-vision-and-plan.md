@@ -325,8 +325,9 @@ implementation.
 - **D6 — Metadata-only audit** is a structural invariant. Never stored:
   prompts, payloads, tool-call arguments/results bodies. Stored: identity,
   lineage, tool name, decision, policy, timestamps, hashes.
-- **D7 — Working codename: Chancery** (§8). Final name locked before
-  public launch; codename unblocks repo, docs, and binary naming now.
+- **D7 — Name: Chancery** (§8). Confirmed as the product name by the
+  founder 2026-07-04 (was: working codename), contingent on domain/org
+  registration and a trademark search before public launch.
 - **D8 — Standards posture:** engage IETF WIMSE/AIMS from month 4 with
   running code; interoperate with XAA rather than compete with it; our
   standards contribution is attenuating delegation + signed lineage.
