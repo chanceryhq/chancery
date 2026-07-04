@@ -11,12 +11,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
 
-	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 
 	"github.com/chanceryhq/chancery/internal/api"
@@ -45,6 +45,7 @@ func defaultDataDir() string {
 type env struct {
 	st  *store.Store
 	iss *identity.Issuer
+	svc *service.Service
 }
 
 func openEnv() (*env, error) {
@@ -61,7 +62,10 @@ func openEnv() (*env, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &env{st: st, iss: iss}, nil
+	// The CLI and the HTTP API are thin clients over one service layer
+	// (RFC-008 §4): register/instance/grant/delegate/check share exactly
+	// one implementation.
+	return &env{st: st, iss: iss, svc: &service.Service{St: st, Iss: iss}}, nil
 }
 
 // hashArg content-addresses a file path or, if the path does not exist,
@@ -162,16 +166,11 @@ func agentCmd() *cobra.Command {
 				return err
 			}
 			defer e.st.Close()
-			a, err := e.st.CreateAgent(args[0], owner, purpose)
+			a, v, err := e.svc.RegisterAgent(args[0], owner, purpose,
+				hashArg(prompt), hashArg(config), hashArg(tools), model)
 			if err != nil {
 				return err
 			}
-			v, err := e.st.CreateVersion(a.ID, hashArg(prompt), hashArg(config), hashArg(tools), model)
-			if err != nil {
-				return err
-			}
-			e.st.Audit(store.AuditEvent{Event: "agent.register", AgentID: a.ID,
-				Reason: fmt.Sprintf("owner=%s version=%s", owner, v.Digest())})
 			fmt.Printf("registered %s\n  id       %s\n  owner    %s\n  version  %d (%s)\n",
 				e.iss.SubjectURI(a.Name), a.ID, a.Owner, v.Seq, v.Digest())
 			return nil
@@ -369,31 +368,12 @@ func instanceCmd() *cobra.Command {
 				return err
 			}
 			defer e.st.Close()
-			a, err := e.st.GetAgentByName(agentName)
+			in, tok, err := e.svc.StartInstance(agentName, ttl)
 			if err != nil {
 				return err
 			}
-			if a.State != store.StateActive {
-				return fmt.Errorf("agent %s is %s: instance refused (fail closed)", a.Name, a.State)
-			}
-			v, err := e.st.LatestVersion(a.ID)
-			if err != nil {
-				return err
-			}
-			in, err := e.st.CreateInstance(a.ID, v.ID, "declared", "")
-			if err != nil {
-				return err
-			}
-			tok, err := e.iss.Issue(identity.IssueParams{
-				AgentName: a.Name, VersionDigest: v.Digest(), InstanceID: in.ID,
-				Owner: a.Owner, AttType: "declared", TTL: ttl,
-			})
-			if err != nil {
-				return err
-			}
-			e.st.Audit(store.AuditEvent{Event: "instance.start", AgentID: a.ID, Instance: in.ID})
-			fmt.Printf("instance %s of %s (version %s)\nidentity document (ttl %s):\n%s\n",
-				in.ID, e.iss.SubjectURI(a.Name), v.Digest(), max(ttl, identity.DefaultTTL), tok)
+			fmt.Printf("instance %s of %s\nidentity document (ttl %s):\n%s\n",
+				in.ID, e.iss.SubjectURI(agentName), max(ttl, identity.DefaultTTL), tok)
 			return nil
 		},
 	}
@@ -470,39 +450,13 @@ func writCmd() *cobra.Command {
 				return err
 			}
 			defer e.st.Close()
-			a, err := e.st.GetAgentByName(toAgent)
+			wid, rootBlockID, err := e.svc.GrantWrit(forP, toAgent, capStrs, ttl, maxDepth)
 			if err != nil {
 				return err
 			}
-			v, err := e.st.LatestVersion(a.ID)
-			if err != nil {
-				return err
-			}
-			var caps []writ.Cap
-			for _, s := range capStrs {
-				c, err := writ.ParseCap(s)
-				if err != nil {
-					return err
-				}
-				caps = append(caps, c)
-			}
-			wid := "w_" + ulid.Make().String()
-			exp := time.Now().UTC().Add(ttl)
-			w, err := writ.Grant(wid, forP, e.iss.SubjectURI(a.Name), v.Digest(),
-				caps, maxDepth, exp, e.iss.Key(), e.iss.KeyID())
-			if err != nil {
-				return err
-			}
-			rootBlockID := "b_" + ulid.Make().String()
-			if err := e.st.CreateWrit(wid, forP, a.ID, maxDepth, exp,
-				rootBlockID, w.JWS[0], e.iss.SubjectURI(a.Name)); err != nil {
-				return err
-			}
-			e.st.Audit(store.AuditEvent{Event: "writ.grant", AgentID: a.ID, WritID: wid,
-				Reason: fmt.Sprintf("for=%s caps=%d", forP, len(caps))})
-			fmt.Printf("writ %s\n  for    %s\n  to     %s (%s)\n  block  %s\n  caps   %s\n  expires %s\n",
-				wid, forP, e.iss.SubjectURI(a.Name), v.Digest(), rootBlockID,
-				strings.Join(capStrs, ", "), exp.Format(time.RFC3339))
+			fmt.Printf("writ %s\n  for    %s\n  to     %s\n  block  %s\n  caps   %s\n  expires %s\n",
+				wid, forP, e.iss.SubjectURI(toAgent), rootBlockID,
+				strings.Join(capStrs, ", "), time.Now().UTC().Add(ttl).Format(time.RFC3339))
 			return nil
 		},
 	}
@@ -528,62 +482,13 @@ func writCmd() *cobra.Command {
 				return err
 			}
 			defer e.st.Close()
-			parent := parentBlock
-			if parent == "" {
-				b, err := e.st.LatestBlock(args[0])
-				if err != nil {
-					return err
-				}
-				parent = b.ID
-			}
-			path, err := e.st.Path(parent)
+			blockID, lineage, err := e.svc.DelegateWrit(args[0], parentBlock, childAgent, caveatStrs, dTTL)
 			if err != nil {
 				return err
 			}
-			var jwsPath []string
-			for _, b := range path {
-				jwsPath = append(jwsPath, b.JWS)
-			}
-			w, err := writ.Verify(jwsPath, &e.iss.Key().PublicKey, time.Now())
-			if err != nil {
-				return err
-			}
-			child, err := e.st.GetAgentByName(childAgent)
-			if err != nil {
-				return err
-			}
-			if child.State != store.StateActive {
-				return fmt.Errorf("child agent %s is %s: delegation refused", child.Name, child.State)
-			}
-			cv, err := e.st.LatestVersion(child.ID)
-			if err != nil {
-				return err
-			}
-			var caveats []writ.Cap
-			for _, s := range caveatStrs {
-				c, err := writ.ParseCap(s)
-				if err != nil {
-					return err
-				}
-				caveats = append(caveats, c)
-			}
-			exp := time.Now().UTC().Add(dTTL)
-			nw, err := writ.Delegate(w, e.iss.SubjectURI(child.Name), cv.Digest(),
-				caveats, exp, e.iss.Key(), e.iss.KeyID())
-			if err != nil {
-				return err
-			}
-			blockID := "b_" + ulid.Make().String()
-			newJWS := nw.JWS[len(nw.JWS)-1]
-			if err := e.st.AppendWritBlock(blockID, args[0], parent, len(nw.Blocks)-1,
-				newJWS, e.iss.SubjectURI(child.Name), exp); err != nil {
-				return err
-			}
-			e.st.Audit(store.AuditEvent{Event: "writ.delegate", AgentID: child.ID, WritID: args[0],
-				Reason: fmt.Sprintf("parent_block=%s caveats=%d", parent, len(caveats))})
 			fmt.Printf("delegated to %s\n  block   %s (depth %d)\n  lineage %s\n",
-				e.iss.SubjectURI(child.Name), blockID, len(nw.Blocks)-1,
-				strings.Join(nw.Lineage(), " -> "))
+				e.iss.SubjectURI(childAgent), blockID, len(lineage)-2,
+				strings.Join(lineage, " -> "))
 			return nil
 		},
 	}
@@ -650,48 +555,12 @@ func writCmd() *cobra.Command {
 				return err
 			}
 			defer e.st.Close()
-			leaf := atBlock
-			if leaf == "" {
-				b, err := e.st.LatestBlock(args[0])
-				if err != nil {
-					return err
-				}
-				leaf = b.ID
-			}
-			deny := func(reason string) error {
-				e.st.Audit(store.AuditEvent{Event: "action.check", WritID: args[0],
-					Verb: verb, Resource: resource, Decision: "DENY", Reason: reason})
-				fmt.Printf("DENY  %s:%s\n  reason: %s\n", verb, resource, reason)
+			d := e.svc.CheckAction(args[0], atBlock, verb, resource)
+			if d.Effect != policy.Allow {
+				fmt.Printf("DENY  %s:%s\n  reason: [%s] %s\n", verb, resource, d.Layer, d.Reason)
 				return nil
 			}
-			path, err := e.st.Path(leaf)
-			if err != nil {
-				return deny(err.Error())
-			}
-			var jwsPath []string
-			for _, b := range path {
-				jwsPath = append(jwsPath, b.JWS)
-			}
-			w, err := writ.Verify(jwsPath, &e.iss.Key().PublicKey, time.Now())
-			if err != nil {
-				return deny(err.Error())
-			}
-			// The acting principal is the leaf block's agent; its
-			// allow-list joins the PDP conjunction (RFC-004).
-			var allowlist []string
-			leafURI := w.Blocks[len(w.Blocks)-1].To
-			if name, ok := strings.CutPrefix(leafURI, "spiffe://"+e.iss.TrustDomain+"/agent/"); ok {
-				if a, err := e.st.GetAgentByName(name); err == nil {
-					allowlist, _ = e.st.GetAllowlist(a.ID)
-				}
-			}
-			d := policy.Decide(w, allowlist, verb, resource)
-			if d.Effect != policy.Allow {
-				return deny("[" + d.Layer + "] " + d.Reason)
-			}
-			e.st.Audit(store.AuditEvent{Event: "action.check", WritID: args[0],
-				Verb: verb, Resource: resource, Decision: "ALLOW", Reason: d.Reason})
-			fmt.Printf("ALLOW  %s:%s\n  lineage: %s\n", verb, resource, strings.Join(w.Lineage(), " -> "))
+			fmt.Printf("ALLOW  %s:%s\n  %s\n", verb, resource, d.Reason)
 			return nil
 		},
 	}
@@ -879,23 +748,13 @@ func mcpCmd() *cobra.Command {
 			// the agent, version, instance, writ, or any block on the
 			// path takes effect on the NEXT tool call, not the next TTL.
 			decide := func(resource string) policy.Decision {
+				// Instance liveness is the PEP-specific gate (a wrapped
+				// session is a runtime instance); the writ/policy decision
+				// is the shared service-layer path.
 				if _, _, _, err := e.st.CheckIssuable(inst.ID); err != nil {
 					return policy.Decision{Effect: policy.Deny, Layer: "registry", Reason: err.Error()}
 				}
-				path, err := e.st.Path(leaf)
-				if err != nil {
-					return policy.Decision{Effect: policy.Deny, Layer: "registry", Reason: err.Error()}
-				}
-				var jwsPath []string
-				for _, b := range path {
-					jwsPath = append(jwsPath, b.JWS)
-				}
-				w, err := writ.Verify(jwsPath, &e.iss.Key().PublicKey, time.Now())
-				if err != nil {
-					return policy.Decision{Effect: policy.Deny, Layer: "writ", Reason: err.Error()}
-				}
-				allowlist, _ := e.st.GetAllowlist(a.ID)
-				return policy.Decide(w, allowlist, "call", resource)
+				return e.svc.Decide(writID, leaf, "call", resource)
 			}
 
 			p := &mcp.Proxy{
@@ -1015,9 +874,49 @@ func secretCmd() *cobra.Command {
 	return cmd
 }
 
+func auditRow(ev store.AuditEvent) []string {
+	vr := ""
+	if ev.Verb != "" {
+		vr = ev.Verb + ":" + ev.Resource
+	}
+	return []string{ev.At.Format("15:04:05"), ev.Event, ev.Decision, vr, ev.WritID, ev.Reason}
+}
+
+// followAudit tails new events as they land (RFC-010 demo: ALLOW events
+// scroll live, then the DENY appears the instant an agent is revoked).
+// Polls the append cursor; exits cleanly on SIGINT.
+func followAudit(e *env, cmd *cobra.Command) error {
+	var cursor int64
+	if latest, err := e.st.AuditTimeline(1); err == nil && len(latest) > 0 {
+		cursor = latest[0].Seq
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	ticker := time.NewTicker(400 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-sig:
+			fmt.Fprintln(cmd.OutOrStdout())
+			return nil
+		case <-ticker.C:
+			events, err := e.st.AuditSince(cursor)
+			if err != nil {
+				return err
+			}
+			for _, ev := range events {
+				cursor = ev.Seq
+				r := auditRow(ev)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s  %-18s %-6s %-30s %s\n",
+					r[0], r[1], r[2], r[3], r[5])
+			}
+		}
+	}
+}
+
 func auditCmd() *cobra.Command {
 	var limit int
-	var asJSON bool
+	var asJSON, follow bool
 	cmd := &cobra.Command{
 		Use:   "audit",
 		Short: "Show the audit timeline (metadata only, hash-chained)",
@@ -1042,19 +941,18 @@ func auditCmd() *cobra.Command {
 			}
 			rows := [][]string{{"AT", "EVENT", "DECISION", "VERB:RESOURCE", "WRIT", "DETAIL"}}
 			for _, ev := range events {
-				vr := ""
-				if ev.Verb != "" {
-					vr = ev.Verb + ":" + ev.Resource
-				}
-				rows = append(rows, []string{ev.At.Format("15:04:05"), ev.Event, ev.Decision, vr,
-					ev.WritID, ev.Reason})
+				rows = append(rows, auditRow(ev))
 			}
 			table(rows)
+			if follow {
+				return followAudit(e, cmd)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 50, "max events")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "NDJSON export (SIEM bridge)")
+	cmd.Flags().BoolVar(&follow, "follow", false, "stream new events as they occur (like tail -f)")
 
 	verify := &cobra.Command{
 		Use:   "verify",

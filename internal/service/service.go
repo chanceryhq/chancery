@@ -169,6 +169,14 @@ func (s *Service) CheckAction(widID, leafBlockID, verb, resource string) policy.
 	return d
 }
 
+// Decide evaluates one action WITHOUT auditing — the in-path decision
+// used by PEPs (e.g. the MCP proxy) that own their own audit wiring so
+// they can enforce deny-on-audit-failure at the transport boundary
+// (RFC-006 §7). CLI/API callers use CheckAction, which audits.
+func (s *Service) Decide(widID, leafBlockID, verb, resource string) policy.Decision {
+	return s.decide(widID, leafBlockID, verb, resource)
+}
+
 func (s *Service) decide(widID, leafBlockID, verb, resource string) policy.Decision {
 	if leafBlockID == "" {
 		b, err := s.St.LatestBlock(widID)

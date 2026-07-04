@@ -294,6 +294,29 @@ func (s *Store) AuditTimeline(limit int) ([]AuditEvent, error) {
 	return s.auditQuery("", nil, limit)
 }
 
+// AuditSince returns events with seq > afterSeq in chronological (append)
+// order — the tail cursor for `audit --follow`.
+func (s *Store) AuditSince(afterSeq int64) ([]AuditEvent, error) {
+	rows, err := s.db.Query(`SELECT seq, id, at, event,
+		COALESCE(agent_id,''), COALESCE(instance_id,''), COALESCE(writ_id,''),
+		COALESCE(verb,''), COALESCE(resource,''), COALESCE(decision,''), COALESCE(reason,''),
+		prev_hash, hash FROM audit_events WHERE seq > ? ORDER BY seq ASC`, afterSeq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuditEvent
+	for rows.Next() {
+		var e AuditEvent
+		if err := rows.Scan(&e.Seq, &e.ID, &e.At, &e.Event, &e.AgentID, &e.Instance, &e.WritID,
+			&e.Verb, &e.Resource, &e.Decision, &e.Reason, &e.PrevHash, &e.Hash); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // VerifyAuditChain walks the full chain and returns the number of
 // verified events, or an error naming the first broken one. Everything
 // before the break remains trustworthy (prefix property).
