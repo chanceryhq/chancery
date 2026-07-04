@@ -22,10 +22,23 @@ trust domain secure and operable is open source; value that exists
 only at organizational scale (SSO/SCIM, multi-tenancy, SIEM exporters,
 compliance packs, HA orchestration) is enterprise.
 
+## Install
+
+```sh
+brew install chanceryhq/tap/chancery          # macOS / Linux
+# or: docker run --rm -v chancery:/data ghcr.io/chanceryhq/chancery --help
+# or: download a signed binary from the Releases page
+# or from source:
+go build -o chancery ./cmd/chancery
+```
+
+Release binaries and checksums are cosign-signed (keyless, via GitHub
+OIDC) and ship with an SBOM; verification instructions are in each
+release's notes.
+
 ## Try it (pre-alpha)
 
 ```sh
-go build -o chancery ./cmd/chancery
 ./chancery init --trust-domain acme.com
 ./chancery agent register deploy-bot --owner user:you@acme.com \
     --purpose "deploys services" --prompt ./prompt.md --model claude-fable-5

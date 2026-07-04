@@ -2,3 +2,6 @@
 *.db
 /chancery
 .claude/
+
+# goreleaser output
+/dist/

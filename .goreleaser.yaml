@@ -1,0 +1,105 @@
+# goreleaser config for Chancery (RFC-010 packaging).
+# Single static binaries, Docker images, Homebrew tap, cosign signatures,
+# and an SBOM per artifact. `goreleaser release --clean` on a tag.
+version: 2
+
+project_name: chancery
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: chancery
+    main: ./cmd/chancery
+    binary: chancery
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: chancery
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+
+# SBOM per archive (syft) — ASI04 supply-chain provenance (RFC-009).
+sboms:
+  - artifacts: archive
+
+# Keyless cosign signing of checksums and images (Sigstore/Fulcio OIDC).
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+# Multi-arch image built with buildx, reusing the release binaries, and
+# signed keylessly (dockers_v2 replaces dockers + docker_manifests).
+dockers_v2:
+  - images:
+      - "ghcr.io/chanceryhq/chancery"
+    tags:
+      - "{{ .Version }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile
+    labels:
+      org.opencontainers.image.source: "https://github.com/chanceryhq/chancery"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.licenses: "Apache-2.0"
+    # Built-in image SBOM (ASI04). Image cosign signing follows once the
+    # dockers_v2 signing surface stabilizes; released binaries and
+    # checksums are already cosign-signed via `signs` above.
+    sbom: syft
+
+# Homebrew tap — the `brew install` story (RFC-010 quickstart).
+homebrew_casks:
+  - name: chancery
+    repository:
+      owner: chanceryhq
+      name: homebrew-tap
+    homepage: "https://github.com/chanceryhq/chancery"
+    description: "The identity provider for AI agents"
+    license: "Apache-2.0"
+    binaries:
+      - chancery
+
+release:
+  github:
+    owner: chanceryhq
+    name: chancery
+  prerelease: auto
+  footer: |
+    ---
+    Verify a download:
+    ```
+    cosign verify-blob --certificate checksums.txt.pem \
+      --signature checksums.txt.sig \
+      --certificate-identity-regexp 'https://github.com/chanceryhq/chancery' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      checksums.txt
+    ```
+    Known MVP security gaps are documented in SECURITY.md.

@@ -31,6 +31,13 @@ import (
 
 var dataDir string
 
+// Build metadata, injected at release time via -ldflags (goreleaser).
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func defaultDataDir() string {
 	if d := os.Getenv("CHANCERY_DATA"); d != "" {
 		return d
@@ -91,6 +98,7 @@ func main() {
 	root := &cobra.Command{
 		Use:           "chancery",
 		Short:         "Chancery — the identity provider for AI agents",
+		Version:       fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
