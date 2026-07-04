@@ -1,0 +1,240 @@
+package mcp
+
+import (
+	"bufio"
+	"encoding/json"
+	"io"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/chanceryhq/chancery/internal/policy"
+)
+
+// fakeServer answers tools/list with two tools and echoes tools/call.
+func fakeServer(t *testing.T, in io.Reader, out io.Writer) {
+	t.Helper()
+	sc := bufio.NewScanner(in)
+	for sc.Scan() {
+		var env struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.Unmarshal(sc.Bytes(), &env); err != nil {
+			continue
+		}
+		switch env.Method {
+		case "tools/list":
+			resp, _ := json.Marshal(map[string]any{
+				"jsonrpc": "2.0", "id": json.RawMessage(env.ID),
+				"result": map[string]any{"tools": []map[string]any{
+					{"name": "echo", "description": "echoes"},
+					{"name": "delete_everything", "description": "dangerous"},
+				}},
+			})
+			out.Write(append(resp, '\n'))
+		case "tools/call":
+			resp, _ := json.Marshal(map[string]any{
+				"jsonrpc": "2.0", "id": json.RawMessage(env.ID),
+				"result": map[string]any{"content": []map[string]any{{"type": "text", "text": "done"}}},
+			})
+			out.Write(append(resp, '\n'))
+		}
+	}
+}
+
+type auditRec struct {
+	event, tool, decision, reason string
+}
+
+type harness struct {
+	toProxy    io.WriteCloser // test writes as the agent
+	fromProxy  *bufio.Scanner // test reads as the agent
+	mu         sync.Mutex
+	auditTrail []auditRec
+}
+
+func (h *harness) audits() []auditRec {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]auditRec(nil), h.auditTrail...)
+}
+
+func newHarness(t *testing.T, decide Decider) *harness {
+	t.Helper()
+	clientR, clientW := io.Pipe()       // agent -> proxy
+	proxyR, proxyW := io.Pipe()         // proxy -> agent
+	serverInR, serverInW := io.Pipe()   // proxy -> server
+	serverOutR, serverOutW := io.Pipe() // server -> proxy
+
+	h := &harness{toProxy: clientW, fromProxy: bufio.NewScanner(proxyR)}
+	p := &Proxy{
+		ClientIn: clientR, ClientOut: proxyW,
+		ServerIn: serverInW, ServerOut: serverOutR,
+		Server: "srv", Decide: decide,
+		Audit: func(event, tool, decision, reason string) {
+			h.mu.Lock()
+			h.auditTrail = append(h.auditTrail, auditRec{event, tool, decision, reason})
+			h.mu.Unlock()
+		},
+	}
+	go fakeServer(t, serverInR, serverOutW)
+	go p.Run()
+	return h
+}
+
+func send(t *testing.T, h *harness, msg string) {
+	t.Helper()
+	if _, err := io.WriteString(h.toProxy, msg+"\n"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func recv(t *testing.T, h *harness) map[string]json.RawMessage {
+	t.Helper()
+	done := make(chan struct{})
+	var out map[string]json.RawMessage
+	go func() {
+		defer close(done)
+		if h.fromProxy.Scan() {
+			json.Unmarshal(h.fromProxy.Bytes(), &out)
+		}
+	}()
+	select {
+	case <-done:
+		return out
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for proxy output")
+		return nil
+	}
+}
+
+func allowOnlyEcho(resource string) policy.Decision {
+	if resource == "srv/echo" {
+		return policy.Decision{Effect: policy.Allow, Layer: "writ", Reason: "lineage user -> agent"}
+	}
+	return policy.Decision{Effect: policy.Deny, Layer: "writ", Reason: "outside effective authority"}
+}
+
+func TestAllowedCallForwards(t *testing.T) {
+	h := newHarness(t, allowOnlyEcho)
+	send(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"x":1}}}`)
+	resp := recv(t, h)
+	if resp["result"] == nil {
+		t.Fatalf("allowed call must reach the server and return a result: %v", resp)
+	}
+	found := false
+	for _, a := range h.audits() {
+		if a.event == "mcp.call" && a.tool == "srv/echo" && a.decision == "ALLOW" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("allowed call must be audited")
+	}
+}
+
+func TestDeniedCallBlockedWithJSONRPCError(t *testing.T) {
+	h := newHarness(t, allowOnlyEcho)
+	send(t, h, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"delete_everything"}}`)
+	resp := recv(t, h)
+	if resp["error"] == nil {
+		t.Fatalf("denied call must return a JSON-RPC error: %v", resp)
+	}
+	var e struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+	json.Unmarshal(resp["error"], &e)
+	if e.Code != DeniedCode {
+		t.Errorf("error code = %d, want %d", e.Code, DeniedCode)
+	}
+	if !strings.Contains(e.Message, "denied by writ policy") {
+		t.Errorf("denial must name the deciding layer: %q", e.Message)
+	}
+	for _, a := range h.audits() {
+		if a.event == "mcp.call" && a.decision == "DENY" && a.tool == "srv/delete_everything" {
+			return
+		}
+	}
+	t.Error("denied call must be audited")
+}
+
+func TestToolsListFiltered(t *testing.T) {
+	h := newHarness(t, allowOnlyEcho)
+	send(t, h, `{"jsonrpc":"2.0","id":7,"method":"tools/list"}`)
+	resp := recv(t, h)
+	var result struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(resp["result"], &result); err != nil {
+		t.Fatalf("bad list result: %v", err)
+	}
+	if len(result.Tools) != 1 || result.Tools[0].Name != "echo" {
+		t.Errorf("model must only see admitted tools, got %+v", result.Tools)
+	}
+}
+
+func TestUnlistedToolStillEnforced(t *testing.T) {
+	// Filtering is UX; the call path is the boundary: calling a tool the
+	// PDP denies must fail even if the client never listed.
+	h := newHarness(t, allowOnlyEcho)
+	send(t, h, `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"delete_everything"}}`)
+	resp := recv(t, h)
+	if resp["error"] == nil {
+		t.Fatal("unlisted-but-denied tool must still be blocked at tools/call")
+	}
+}
+
+func TestMalformedClientFrameDropped(t *testing.T) {
+	h := newHarness(t, allowOnlyEcho)
+	send(t, h, `{"jsonrpc":"2.0", this is not json`)
+	// The proxy must survive and keep serving.
+	send(t, h, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"echo"}}`)
+	resp := recv(t, h)
+	if resp["result"] == nil {
+		t.Fatal("proxy must keep working after a malformed frame")
+	}
+	found := false
+	for _, a := range h.audits() {
+		if a.event == "mcp.malformed" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("malformed frame must be audited")
+	}
+}
+
+func TestCallWithoutToolNameDenied(t *testing.T) {
+	h := newHarness(t, allowOnlyEcho)
+	send(t, h, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{}}`)
+	resp := recv(t, h)
+	if resp["error"] == nil {
+		t.Fatal("tools/call without a name must be denied, not forwarded")
+	}
+}
+
+func TestNonToolTrafficPassesThrough(t *testing.T) {
+	// initialize must reach the server untouched even under a
+	// deny-everything decider.
+	h := newHarness(t, func(string) policy.Decision {
+		return policy.Decision{Effect: policy.Deny, Layer: "writ", Reason: "no"}
+	})
+	send(t, h, `{"jsonrpc":"2.0","id":5,"method":"tools/list"}`)
+	resp := recv(t, h)
+	if resp["result"] == nil {
+		t.Fatal("tools/list must pass through (filtered), not be blocked")
+	}
+	var result struct {
+		Tools []any `json:"tools"`
+	}
+	json.Unmarshal(resp["result"], &result)
+	if len(result.Tools) != 0 {
+		t.Errorf("deny-all decider must hide every tool, got %d", len(result.Tools))
+	}
+}

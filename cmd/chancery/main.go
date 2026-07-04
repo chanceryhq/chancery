@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -16,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/chanceryhq/chancery/internal/identity"
+	"github.com/chanceryhq/chancery/internal/mcp"
 	"github.com/chanceryhq/chancery/internal/policy"
 	"github.com/chanceryhq/chancery/internal/seal"
 	"github.com/chanceryhq/chancery/internal/store"
@@ -85,7 +87,7 @@ func main() {
 	}
 	root.PersistentFlags().StringVar(&dataDir, "data-dir", defaultDataDir(), "state directory")
 
-	root.AddCommand(initCmd(), agentCmd(), instanceCmd(), tokenCmd(), writCmd(), auditCmd(), secretCmd())
+	root.AddCommand(initCmd(), agentCmd(), instanceCmd(), tokenCmd(), writCmd(), auditCmd(), secretCmd(), mcpCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -701,6 +703,149 @@ func writCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(grant, delegate, show, check, revoke, list)
+	return cmd
+}
+
+func mcpCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "mcp", Short: "Runtime enforcement for MCP servers (RFC-005)"}
+
+	var agentName, writID, blockID, serverName string
+	var secretMaps []string
+	wrap := &cobra.Command{
+		Use:   "wrap --agent <name> --writ <id> -- <server command> [args...]",
+		Short: "Run an MCP server behind Chancery: per-call policy, audit, sealed secrets",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+
+			a, err := e.st.GetAgentByName(agentName)
+			if err != nil {
+				return err
+			}
+			if a.State != store.StateActive {
+				return fmt.Errorf("agent %s is %s: refusing to start (fail closed)", a.Name, a.State)
+			}
+			v, err := e.st.LatestVersion(a.ID)
+			if err != nil {
+				return err
+			}
+			// The wrapped session is a runtime instance (RFC-001):
+			// `chancery instance revoke` kills it on its next call.
+			inst, err := e.st.CreateInstance(a.ID, v.ID, "declared", "mcp-wrap")
+			if err != nil {
+				return err
+			}
+			leaf := blockID
+			if leaf == "" {
+				b, err := e.st.LatestBlock(writID)
+				if err != nil {
+					return err
+				}
+				leaf = b.ID
+			}
+			if serverName == "" {
+				serverName = filepath.Base(args[0])
+			}
+
+			// Scrubbed child env: baseline + sealed secrets only. The
+			// agent-side process tree never holds a real credential.
+			childEnv := []string{}
+			for _, k := range []string{"PATH", "HOME", "TMPDIR", "LANG"} {
+				if val := os.Getenv(k); val != "" {
+					childEnv = append(childEnv, k+"="+val)
+				}
+			}
+			if len(secretMaps) > 0 {
+				ss, err := seal.Open(dataDir)
+				if err != nil {
+					return err
+				}
+				for _, m := range secretMaps {
+					envVar, name, ok := strings.Cut(m, "=")
+					if !ok {
+						return fmt.Errorf("--secret %q is not ENV_VAR=sealed-name", m)
+					}
+					val, err := ss.Get(name)
+					if err != nil {
+						return fmt.Errorf("refusing to start: %w", err)
+					}
+					childEnv = append(childEnv, envVar+"="+val)
+				}
+			}
+
+			server := exec.Command(args[0], args[1:]...)
+			server.Env = childEnv
+			server.Stderr = os.Stderr
+			serverIn, err := server.StdinPipe()
+			if err != nil {
+				return err
+			}
+			serverOut, err := server.StdoutPipe()
+			if err != nil {
+				return err
+			}
+			if err := server.Start(); err != nil {
+				return err
+			}
+
+			audit := func(event, tool, decision, reason string) {
+				e.st.Audit(store.AuditEvent{Event: event, AgentID: a.ID, Instance: inst.ID,
+					WritID: writID, Verb: "call", Resource: tool, Decision: decision, Reason: reason})
+			}
+			audit("mcp.wrap_start", serverName, "", fmt.Sprintf("cmd=%s writ=%s", args[0], writID))
+
+			// The decider re-reads registry state per call: revocation of
+			// the agent, version, instance, writ, or any block on the
+			// path takes effect on the NEXT tool call, not the next TTL.
+			decide := func(resource string) policy.Decision {
+				if _, _, _, err := e.st.CheckIssuable(inst.ID); err != nil {
+					return policy.Decision{Effect: policy.Deny, Layer: "registry", Reason: err.Error()}
+				}
+				path, err := e.st.Path(leaf)
+				if err != nil {
+					return policy.Decision{Effect: policy.Deny, Layer: "registry", Reason: err.Error()}
+				}
+				var jwsPath []string
+				for _, b := range path {
+					jwsPath = append(jwsPath, b.JWS)
+				}
+				w, err := writ.Verify(jwsPath, &e.iss.Key().PublicKey, time.Now())
+				if err != nil {
+					return policy.Decision{Effect: policy.Deny, Layer: "writ", Reason: err.Error()}
+				}
+				allowlist, _ := e.st.GetAllowlist(a.ID)
+				return policy.Decide(w, allowlist, "call", resource)
+			}
+
+			p := &mcp.Proxy{
+				ClientIn: os.Stdin, ClientOut: os.Stdout,
+				ServerIn: serverIn, ServerOut: serverOut,
+				Server: serverName, Decide: decide, Audit: audit,
+			}
+			runErr := p.Run()
+			serverIn.Close()
+			waitErr := server.Wait()
+			audit("mcp.server_exit", serverName, "", fmt.Sprintf("proxy=%v server=%v", runErr, waitErr))
+			if waitErr != nil {
+				return fmt.Errorf("mcp server exited: %w", waitErr)
+			}
+			return runErr
+		},
+	}
+	wrap.Flags().StringVar(&agentName, "agent", "", "acting agent name (required)")
+	wrap.Flags().StringVar(&writID, "writ", "", "writ id carrying the agent's authority (required)")
+	wrap.Flags().StringVar(&blockID, "block", "", "acting writ block (default: writ's latest block)")
+	wrap.Flags().StringVar(&serverName, "server-name", "", "resource namespace (default: server binary name)")
+	wrap.Flags().StringSliceVar(&secretMaps, "secret", nil,
+		"inject sealed secret into the SERVER env: ENV_VAR=sealed-name (repeatable)")
+	wrap.MarkFlagRequired("agent")
+	wrap.MarkFlagRequired("writ")
+
+	cmd.AddCommand(wrap)
 	return cmd
 }
 
