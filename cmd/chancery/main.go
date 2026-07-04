@@ -254,7 +254,11 @@ func agentCmd() *cobra.Command {
 					return err
 				}
 				e.st.Audit(store.AuditEvent{Event: "agent." + use, AgentID: a.ID})
-				fmt.Printf("%s is now %s — takes effect on the next in-path check\n", args[0], target)
+				note := ""
+				if target == store.StateRevoked || target == store.StateRetired {
+					note = " (TERMINAL — this cannot be undone)"
+				}
+				fmt.Printf("%s is now %s — takes effect on the next in-path check%s\n", args[0], target, note)
 				return nil
 			},
 		}
@@ -299,10 +303,39 @@ func agentCmd() *cobra.Command {
 	allow.Flags().StringSliceVar(&toolPatterns, "tool", nil,
 		"allowed tool pattern (repeatable; empty clears; '!none' denies all)")
 
-	cmd.AddCommand(register, list, describe, allow,
+	var newOwner string
+	transfer := &cobra.Command{
+		Use:   "transfer <name>",
+		Short: "Transfer ownership — the only exit from orphaned (RFC-007)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			a, err := e.st.GetAgentByName(args[0])
+			if err != nil {
+				return err
+			}
+			if err := e.st.TransferOwner(args[0], newOwner); err != nil {
+				return err
+			}
+			e.st.Audit(store.AuditEvent{Event: "agent.transfer", AgentID: a.ID,
+				Reason: fmt.Sprintf("from=%s to=%s", a.Owner, newOwner)})
+			fmt.Printf("%s ownership transferred to %s\n", args[0], newOwner)
+			return nil
+		},
+	}
+	transfer.Flags().StringVar(&newOwner, "owner", "", "new accountable owner principal (required)")
+	transfer.MarkFlagRequired("owner")
+
+	cmd.AddCommand(register, list, describe, allow, transfer,
 		state("suspend", "Suspend an agent (reversible)", store.StateSuspended),
 		state("resume", "Reactivate a suspended agent", store.StateActive),
-		state("revoke", "Revoke an agent identity — kills all versions and instances", store.StateRevoked))
+		state("retire", "Retire an agent — terminal, administrative end-of-life", store.StateRetired),
+		state("orphan", "Mark an agent ownerless — blocks issuance until transfer", store.StateOrphaned),
+		state("revoke", "Revoke an agent identity — terminal; kills all versions and instances", store.StateRevoked))
 	return cmd
 }
 

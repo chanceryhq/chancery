@@ -16,10 +16,11 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("not found")
-	ErrConflict = errors.New("already exists")
-	ErrInactive = errors.New("principal is not active")
-	ErrRevoked  = errors.New("revoked")
+	ErrNotFound          = errors.New("not found")
+	ErrConflict          = errors.New("already exists")
+	ErrInactive          = errors.New("principal is not active")
+	ErrRevoked           = errors.New("revoked")
+	ErrIllegalTransition = errors.New("illegal lifecycle transition")
 )
 
 // Agent lifecycle states (RFC-001 §4).
@@ -203,18 +204,74 @@ func (s *Store) ListAgents() ([]Agent, error) {
 	return out, rows.Err()
 }
 
-// SetAgentState transitions lifecycle state. Revoking or suspending an agent
-// takes effect on the next in-path check (RFC-001 §4: revocation at the
-// identity layer kills all versions and instances).
+// legalTransitions is the locked agent state machine (RFC-007 §4).
+// retired and revoked are terminal: they have no exits, and the map
+// having no entry for them is the enforcement. orphaned exits to active
+// only via TransferOwner, never via SetAgentState.
+var legalTransitions = map[string]map[string]bool{
+	StateActive:    {StateSuspended: true, StateRetired: true, StateRevoked: true, StateOrphaned: true},
+	StateSuspended: {StateActive: true, StateRetired: true, StateRevoked: true, StateOrphaned: true},
+	StateOrphaned:  {StateRetired: true, StateRevoked: true},
+}
+
+// SetAgentState transitions lifecycle state, enforcing the transition
+// table at the data layer: no client — including a compromised API
+// handler — can resurrect a terminal identity. Takes effect on the next
+// in-path check.
 func (s *Store) SetAgentState(name, state string) error {
-	res, err := s.db.Exec(`UPDATE agents SET state = ? WHERE name = ?`, state, name)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	defer tx.Rollback()
+	var current string
+	err = tx.QueryRow(`SELECT state FROM agents WHERE name = ?`, name).Scan(&current)
+	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("%w: agent %q", ErrNotFound, name)
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if !legalTransitions[current][state] {
+		return fmt.Errorf("%w: %s → %s (agent %q)", ErrIllegalTransition, current, state, name)
+	}
+	if _, err := tx.Exec(`UPDATE agents SET state = ? WHERE name = ?`, state, name); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// TransferOwner assigns a new accountable owner. It is the ONLY exit
+// from orphaned back to active (RFC-007 §4): no ownerless active
+// agents, and no state-verb that skips re-establishing accountability.
+func (s *Store) TransferOwner(name, newOwner string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var current string
+	err = tx.QueryRow(`SELECT state FROM agents WHERE name = ?`, name).Scan(&current)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: agent %q", ErrNotFound, name)
+	}
+	if err != nil {
+		return err
+	}
+	switch current {
+	case StateRetired, StateRevoked:
+		return fmt.Errorf("%w: cannot transfer ownership of a %s agent", ErrIllegalTransition, current)
+	case StateOrphaned:
+		if _, err := tx.Exec(`UPDATE agents SET owner = ?, state = ? WHERE name = ?`,
+			newOwner, StateActive, name); err != nil {
+			return err
+		}
+	default:
+		if _, err := tx.Exec(`UPDATE agents SET owner = ? WHERE name = ?`, newOwner, name); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // --- versions ---
