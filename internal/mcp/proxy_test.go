@@ -74,10 +74,11 @@ func newHarness(t *testing.T, decide Decider) *harness {
 		ClientIn: clientR, ClientOut: proxyW,
 		ServerIn: serverInW, ServerOut: serverOutR,
 		Server: "srv", Decide: decide,
-		Audit: func(event, tool, decision, reason string) {
+		Audit: func(event, tool, decision, reason string) error {
 			h.mu.Lock()
 			h.auditTrail = append(h.auditTrail, auditRec{event, tool, decision, reason})
 			h.mu.Unlock()
+			return nil
 		},
 	}
 	go fakeServer(t, serverInR, serverOutW)
@@ -236,5 +237,55 @@ func TestNonToolTrafficPassesThrough(t *testing.T) {
 	json.Unmarshal(resp["result"], &result)
 	if len(result.Tools) != 0 {
 		t.Errorf("deny-all decider must hide every tool, got %d", len(result.Tools))
+	}
+}
+
+func TestAuditFailureDeniesAllowedCall(t *testing.T) {
+	// RFC-006 §7: an unrecordable action does not happen. Even a call the
+	// PDP allows must be denied if the audit record cannot be written.
+	clientR, clientW := io.Pipe()
+	proxyR, proxyW := io.Pipe()
+	serverInR, serverInW := io.Pipe()
+	serverOutR, serverOutW := io.Pipe()
+	_ = serverInR
+	_ = serverOutW
+
+	p := &Proxy{
+		ClientIn: clientR, ClientOut: proxyW,
+		ServerIn: serverInW, ServerOut: serverOutR,
+		Server: "srv", Decide: allowOnlyEcho,
+		Audit: func(event, tool, decision, reason string) error {
+			if decision == "ALLOW" {
+				return io.ErrClosedPipe // simulate audit store down
+			}
+			return nil
+		},
+	}
+	go p.Run()
+
+	go io.WriteString(clientW, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo"}}`+"\n")
+	sc := bufio.NewScanner(proxyR)
+	done := make(chan map[string]json.RawMessage, 1)
+	go func() {
+		var out map[string]json.RawMessage
+		if sc.Scan() {
+			json.Unmarshal(sc.Bytes(), &out)
+		}
+		done <- out
+	}()
+	select {
+	case resp := <-done:
+		if resp["error"] == nil {
+			t.Fatalf("allowed-but-unauditable call must be denied: %v", resp)
+		}
+		var e struct {
+			Message string `json:"message"`
+		}
+		json.Unmarshal(resp["error"], &e)
+		if !strings.Contains(e.Message, "audit") {
+			t.Errorf("denial must name the audit layer: %q", e.Message)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out")
 	}
 }

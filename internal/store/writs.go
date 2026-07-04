@@ -1,9 +1,12 @@
 package store
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -192,9 +195,13 @@ func (s *Store) RevokeWritBlock(blockID string) error {
 	return nil
 }
 
-// --- audit (RFC-006 preview: metadata only, by construction) ---
+// --- audit (RFC-006: metadata only, hash-chained, tamper-evident) ---
+
+// GenesisHash anchors the first event in the chain.
+const GenesisHash = "chancery-genesis"
 
 type AuditEvent struct {
+	Seq      int64
 	ID       string
 	At       time.Time
 	Event    string
@@ -205,8 +212,27 @@ type AuditEvent struct {
 	Resource string
 	Decision string
 	Reason   string
+	PrevHash string
+	Hash     string
 }
 
+// canonical is the hashed encoding (RFC-006 §4): \x1f-separated, fixed
+// field order, timestamps in RFC3339Nano UTC. There is no field for
+// payloads because the schema has none — D6 by DDL.
+func (e *AuditEvent) canonical() string {
+	return strings.Join([]string{e.ID, e.At.UTC().Format(time.RFC3339Nano), e.Event,
+		e.AgentID, e.Instance, e.WritID, e.Verb, e.Resource, e.Decision, e.Reason}, "\x1f")
+}
+
+func chainHash(prev string, e *AuditEvent) string {
+	sum := sha256.Sum256([]byte(prev + "\x1f" + e.canonical()))
+	return hex.EncodeToString(sum[:])
+}
+
+// Audit appends a hash-chained event. Insertion is serialized on the
+// chain head in one transaction — correctness over throughput (RFC-006
+// §4). PEPs must treat an Audit error as a deny: an unrecordable action
+// does not happen.
 func (s *Store) Audit(e AuditEvent) error {
 	if e.ID == "" {
 		e.ID = newID()
@@ -214,21 +240,37 @@ func (s *Store) Audit(e AuditEvent) error {
 	if e.At.IsZero() {
 		e.At = time.Now().UTC()
 	}
-	_, err := s.db.Exec(`INSERT INTO audit_events
-		(id, at, event, agent_id, instance_id, writ_id, verb, resource, decision, reason)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, e.At, e.Event, e.AgentID, e.Instance, e.WritID, e.Verb, e.Resource, e.Decision, e.Reason)
-	return err
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	prev := GenesisHash
+	err = tx.QueryRow(`SELECT hash FROM audit_events ORDER BY seq DESC LIMIT 1`).Scan(&prev)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	e.PrevHash = prev
+	e.Hash = chainHash(prev, &e)
+	if _, err := tx.Exec(`INSERT INTO audit_events
+		(id, at, event, agent_id, instance_id, writ_id, verb, resource, decision, reason, prev_hash, hash)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.At, e.Event, e.AgentID, e.Instance, e.WritID, e.Verb, e.Resource,
+		e.Decision, e.Reason, e.PrevHash, e.Hash); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-func (s *Store) AuditTimeline(limit int) ([]AuditEvent, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := s.db.Query(`SELECT id, at, event,
+func (s *Store) auditQuery(where string, args []any, limit int) ([]AuditEvent, error) {
+	q := `SELECT seq, id, at, event,
 		COALESCE(agent_id,''), COALESCE(instance_id,''), COALESCE(writ_id,''),
-		COALESCE(verb,''), COALESCE(resource,''), COALESCE(decision,''), COALESCE(reason,'')
-		FROM audit_events ORDER BY at DESC LIMIT ?`, limit)
+		COALESCE(verb,''), COALESCE(resource,''), COALESCE(decision,''), COALESCE(reason,''),
+		prev_hash, hash FROM audit_events ` + where + ` ORDER BY seq DESC`
+	if limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -236,11 +278,41 @@ func (s *Store) AuditTimeline(limit int) ([]AuditEvent, error) {
 	var out []AuditEvent
 	for rows.Next() {
 		var e AuditEvent
-		if err := rows.Scan(&e.ID, &e.At, &e.Event, &e.AgentID, &e.Instance, &e.WritID,
-			&e.Verb, &e.Resource, &e.Decision, &e.Reason); err != nil {
+		if err := rows.Scan(&e.Seq, &e.ID, &e.At, &e.Event, &e.AgentID, &e.Instance, &e.WritID,
+			&e.Verb, &e.Resource, &e.Decision, &e.Reason, &e.PrevHash, &e.Hash); err != nil {
 			return nil, err
 		}
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) AuditTimeline(limit int) ([]AuditEvent, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	return s.auditQuery("", nil, limit)
+}
+
+// VerifyAuditChain walks the full chain and returns the number of
+// verified events, or an error naming the first broken one. Everything
+// before the break remains trustworthy (prefix property).
+func (s *Store) VerifyAuditChain() (int, error) {
+	events, err := s.auditQuery("", nil, 0)
+	if err != nil {
+		return 0, err
+	}
+	// auditQuery returns newest-first; walk oldest-first.
+	prev := GenesisHash
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if e.PrevHash != prev {
+			return len(events) - 1 - i, fmt.Errorf("audit chain broken at seq %d (event %s): prev_hash mismatch — an event was edited, deleted, or reordered", e.Seq, e.ID)
+		}
+		if chainHash(prev, &e) != e.Hash {
+			return len(events) - 1 - i, fmt.Errorf("audit chain broken at seq %d (event %s): content hash mismatch — the event was modified", e.Seq, e.ID)
+		}
+		prev = e.Hash
+	}
+	return len(events), nil
 }

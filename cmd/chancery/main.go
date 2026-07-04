@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -792,8 +793,8 @@ func mcpCmd() *cobra.Command {
 				return err
 			}
 
-			audit := func(event, tool, decision, reason string) {
-				e.st.Audit(store.AuditEvent{Event: event, AgentID: a.ID, Instance: inst.ID,
+			audit := func(event, tool, decision, reason string) error {
+				return e.st.Audit(store.AuditEvent{Event: event, AgentID: a.ID, Instance: inst.ID,
 					WritID: writID, Verb: "call", Resource: tool, Decision: decision, Reason: reason})
 			}
 			audit("mcp.wrap_start", serverName, "", fmt.Sprintf("cmd=%s writ=%s", args[0], writID))
@@ -940,9 +941,10 @@ func secretCmd() *cobra.Command {
 
 func auditCmd() *cobra.Command {
 	var limit int
+	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "audit",
-		Short: "Show the audit timeline (metadata only, by construction)",
+		Short: "Show the audit timeline (metadata only, hash-chained)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			e, err := openEnv()
 			if err != nil {
@@ -952,6 +954,15 @@ func auditCmd() *cobra.Command {
 			events, err := e.st.AuditTimeline(limit)
 			if err != nil {
 				return err
+			}
+			if asJSON {
+				enc := json.NewEncoder(os.Stdout)
+				for _, ev := range events {
+					if err := enc.Encode(ev); err != nil {
+						return err
+					}
+				}
+				return nil
 			}
 			rows := [][]string{{"AT", "EVENT", "DECISION", "VERB:RESOURCE", "WRIT", "DETAIL"}}
 			for _, ev := range events {
@@ -967,5 +978,25 @@ func auditCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 50, "max events")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "NDJSON export (SIEM bridge)")
+
+	verify := &cobra.Command{
+		Use:   "verify",
+		Short: "Verify the audit hash chain — detects edits, deletions, reorders",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			n, err := e.st.VerifyAuditChain()
+			if err != nil {
+				return fmt.Errorf("INTEGRITY FAILURE after %d intact events: %w", n, err)
+			}
+			fmt.Printf("audit chain intact: %d events verified\n", n)
+			return nil
+		},
+	}
+	cmd.AddCommand(verify)
 	return cmd
 }

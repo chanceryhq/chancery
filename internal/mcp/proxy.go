@@ -29,8 +29,10 @@ const maxFrame = 10 * 1024 * 1024
 // revocation becomes "next call" instead of "next token expiry".
 type Decider func(resource string) policy.Decision
 
-// AuditFn records a decision or protocol event. Metadata only.
-type AuditFn func(event, tool, decision, reason string)
+// AuditFn records a decision or protocol event. Metadata only. An error
+// from AuditFn on the allow path DENIES the action (RFC-006 §7): an
+// unrecordable action does not happen.
+type AuditFn func(event, tool, decision, reason string) error
 
 type Proxy struct {
 	ClientIn  io.Reader // from the agent
@@ -61,10 +63,11 @@ func (p *Proxy) writeClient(line []byte) error {
 	return err
 }
 
-func (p *Proxy) audit(event, tool, decision, reason string) {
-	if p.Audit != nil {
-		p.Audit(event, tool, decision, reason)
+func (p *Proxy) audit(event, tool, decision, reason string) error {
+	if p.Audit == nil {
+		return nil
 	}
+	return p.Audit(event, tool, decision, reason)
 }
 
 // Run pumps both directions until either side closes. The returned error
@@ -108,7 +111,14 @@ func (p *Proxy) clientLoop() error {
 				p.deny(env.ID, params.Name, d)
 				continue
 			}
-			p.audit("mcp.call", resource, "ALLOW", d.Reason)
+			// Audit BEFORE forwarding: if the record cannot be written,
+			// the action does not happen (RFC-006 §7).
+			if err := p.audit("mcp.call", resource, "ALLOW", d.Reason); err != nil {
+				p.deny(env.ID, params.Name, policy.Decision{
+					Effect: policy.Deny, Layer: "audit",
+					Reason: "audit unavailable; refusing unrecordable action"})
+				continue
+			}
 		case "tools/list":
 			if env.ID != nil {
 				p.pendingList.Store(string(env.ID), struct{}{})

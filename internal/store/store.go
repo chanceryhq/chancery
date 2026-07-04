@@ -117,11 +117,13 @@ CREATE TABLE IF NOT EXISTS tool_allowlists (
 	PRIMARY KEY (agent_id, pattern)
 );
 CREATE TABLE IF NOT EXISTS audit_events (
-	id TEXT PRIMARY KEY, at TIMESTAMP NOT NULL,
+	seq INTEGER PRIMARY KEY AUTOINCREMENT,
+	id TEXT NOT NULL UNIQUE, at TIMESTAMP NOT NULL,
 	event TEXT NOT NULL,
 	agent_id TEXT, version_id TEXT, instance_id TEXT,
 	writ_id TEXT, writ_block INTEGER,
-	verb TEXT, resource TEXT, decision TEXT, reason TEXT
+	verb TEXT, resource TEXT, decision TEXT, reason TEXT,
+	prev_hash TEXT NOT NULL, hash TEXT NOT NULL
 );
 `
 
