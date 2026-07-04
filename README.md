@@ -11,7 +11,16 @@ delegate, revoke — instantly, at the identity or instance level. Audit is
 metadata-only as a structural invariant: prompts and payloads are never
 stored.
 
-Single Go binary. Apache-2.0 core. MCP-first, then HTTP, shell, browser.
+Single Go binary. Apache-2.0. MCP-first, then HTTP, shell, browser.
+Try the 60-second story: `make demo`.
+
+**Two promises** ([RFC-011](rfcs/011-open-core-boundary.md)): what
+ships open source stays Apache-2.0 — no license flip, ever; and
+security is never paywalled — every gap in [SECURITY.md](SECURITY.md)
+closes in the open core. The boundary test: whatever makes a single
+trust domain secure and operable is open source; value that exists
+only at organizational scale (SSO/SCIM, multi-tenancy, SIEM exporters,
+compliance packs, HA orchestration) is enterprise.
 
 ## Try it (pre-alpha)
 
@@ -64,5 +73,5 @@ Design happens as a series of locked decisions, one RFC at a time
 | [007](rfcs/007-lifecycle-and-revocation.md) | Lifecycle and revocation | In Review |
 | [008](rfcs/008-data-model-and-apis.md) | Data model and APIs | In Review |
 | [009](rfcs/009-threat-model.md) | Threat model | In Review |
-| 010 | MVP scope (the 90-day build) | — |
-| 011 | Open-core boundary | — |
+| [010](rfcs/010-mvp-scope.md) | MVP scope (the 90-day build) | In Review |
+| [011](rfcs/011-open-core-boundary.md) | Open-core boundary | In Review |
