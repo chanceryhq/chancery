@@ -4,6 +4,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,6 +20,24 @@ import (
 type Service struct {
 	St  *store.Store
 	Iss *identity.Issuer
+}
+
+// resolveAgent looks up an agent by name and, if it does not exist,
+// records a shadow-agent observation before returning the error
+// (RFC-000 Addendum A, Q7): every reference to an unregistered agent at
+// a control-plane surface is a discovery signal in the audit stream —
+// inventory as a byproduct of enforcement, not a scanner. `where` names
+// the surface (e.g. "instance.start") for the audit reason.
+func (s *Service) resolveAgent(name, where string) (*store.Agent, error) {
+	a, err := s.St.GetAgentByName(name)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			s.St.Audit(store.AuditEvent{Event: "agent.unregistered_ref",
+				Reason: fmt.Sprintf("name=%s at=%s", name, where)})
+		}
+		return nil, err
+	}
+	return a, nil
 }
 
 // RegisterAgent creates the durable identity and its first version.
@@ -40,7 +59,7 @@ func (s *Service) RegisterAgent(name, owner, purpose, promptSHA, configSHA, tool
 // StartInstance registers a runtime instance and issues its first
 // identity document (RFC-001).
 func (s *Service) StartInstance(agentName string, ttl time.Duration) (*store.Instance, string, error) {
-	a, err := s.St.GetAgentByName(agentName)
+	a, err := s.resolveAgent(agentName, "instance.start")
 	if err != nil {
 		return nil, "", err
 	}
@@ -68,7 +87,7 @@ func (s *Service) StartInstance(agentName string, ttl time.Duration) (*store.Ins
 
 // GrantWrit mints block 0 (RFC-002).
 func (s *Service) GrantWrit(forPrincipal, agentName string, capStrs []string, ttl time.Duration, maxDepth int) (widID, blockID string, err error) {
-	a, err := s.St.GetAgentByName(agentName)
+	a, err := s.resolveAgent(agentName, "writ.grant")
 	if err != nil {
 		return "", "", err
 	}
@@ -115,7 +134,7 @@ func (s *Service) DelegateWrit(widID, parentBlockID, childName string, caveatStr
 	if err != nil {
 		return "", nil, err
 	}
-	child, err := s.St.GetAgentByName(childName)
+	child, err := s.resolveAgent(childName, "writ.delegate")
 	if err != nil {
 		return "", nil, err
 	}

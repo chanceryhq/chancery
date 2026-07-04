@@ -69,6 +69,18 @@ The audit timeline is hash-chained — `./chancery audit verify` detects
 any edit, deletion, or reorder. Known MVP gaps are published in
 [RFC-009 §5](rfcs/009-threat-model.md).
 
+## Guides
+
+- [**Quickstart**](QUICKSTART.md) — govern the real filesystem MCP server in 5 minutes
+- [Concepts](docs/concepts.md) — agent, version, instance, writ
+- [Claude Code / MCP client setup](examples/claude-code/README.md) — the `.mcp.json` drop-in
+- [Go SDK](sdk/) and [example agent](examples/go-agent/) — advisory in-process checks over the API
+- [LangGraph / Python agents](examples/langgraph/README.md) — the deployment-shaped integration
+
+The SDK is **advisory** — a client-side convenience. The enforcement
+boundary is always the out-of-process proxy (`chancery mcp wrap`), which
+a prompt-injected agent cannot talk its way around.
+
 ## Design RFCs
 
 Design happens as a series of locked decisions, one RFC at a time

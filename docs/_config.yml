@@ -1,0 +1,7 @@
+# GitHub Pages (native Jekyll, served from /docs on the default branch —
+# no CI required). chancery.dev can later be added as a custom domain
+# with zero content change (RFC-010).
+title: Chancery
+description: The identity provider for AI agents
+theme: jekyll-theme-cayman
+show_downloads: false
