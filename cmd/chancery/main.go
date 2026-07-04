@@ -3,10 +3,12 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,10 +19,12 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/chanceryhq/chancery/internal/api"
 	"github.com/chanceryhq/chancery/internal/identity"
 	"github.com/chanceryhq/chancery/internal/mcp"
 	"github.com/chanceryhq/chancery/internal/policy"
 	"github.com/chanceryhq/chancery/internal/seal"
+	"github.com/chanceryhq/chancery/internal/service"
 	"github.com/chanceryhq/chancery/internal/store"
 	"github.com/chanceryhq/chancery/internal/writ"
 )
@@ -88,7 +92,7 @@ func main() {
 	}
 	root.PersistentFlags().StringVar(&dataDir, "data-dir", defaultDataDir(), "state directory")
 
-	root.AddCommand(initCmd(), agentCmd(), instanceCmd(), tokenCmd(), writCmd(), auditCmd(), secretCmd(), mcpCmd())
+	root.AddCommand(initCmd(), agentCmd(), instanceCmd(), tokenCmd(), writCmd(), auditCmd(), secretCmd(), mcpCmd(), serveCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -122,7 +126,19 @@ func initCmd() *cobra.Command {
 			if _, err := identity.LoadOrCreate(dataDir, trustDomain, issuerURL); err != nil {
 				return err
 			}
+			// Mint the admin API token once; only its hash is stored
+			// (RFC-008 §4).
+			raw := make([]byte, 32)
+			if _, err := rand.Read(raw); err != nil {
+				return err
+			}
+			adminToken := "chy_" + hex.EncodeToString(raw)
+			sum := sha256.Sum256([]byte(adminToken))
+			if err := st.SetConfig("admin_token_hash", hex.EncodeToString(sum[:])); err != nil {
+				return err
+			}
 			fmt.Printf("initialized trust domain %s (issuer %s) in %s\n", trustDomain, issuerURL, dataDir)
+			fmt.Printf("\nadmin API token (shown ONCE — store it now):\n  %s\n", adminToken)
 			return nil
 		},
 	}
@@ -737,6 +753,33 @@ func writCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(grant, delegate, show, check, revoke, list)
+	return cmd
+}
+
+func serveCmd() *cobra.Command {
+	var listen string
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Run the control-plane HTTP API (RFC-008)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			tokenHash, err := e.st.GetConfig("admin_token_hash")
+			if err != nil {
+				return fmt.Errorf("no admin token — re-run `chancery init` (pre-alpha state upgrade)")
+			}
+			srv := &api.Server{
+				Svc:            &service.Service{St: e.st, Iss: e.iss},
+				AdminTokenHash: tokenHash,
+			}
+			fmt.Printf("chancery control plane listening on %s (TLS termination is on you — bind stays local by default)\n", listen)
+			return http.ListenAndServe(listen, srv.Handler())
+		},
+	}
+	cmd.Flags().StringVar(&listen, "listen", "127.0.0.1:7423", "listen address")
 	return cmd
 }
 
