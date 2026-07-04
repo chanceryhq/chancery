@@ -43,7 +43,7 @@ func TestMatchSemantics(t *testing.T) {
 		{"github/*", "githubx/get_repo", false},
 		{"github/get_*", "github/get_repo", true},
 		{"github/get_*", "github/getrepo", false},
-		{"github/get*", "github/getrepo", true},     // documented, discouraged
+		{"github/get*", "github/getrepo", true},      // documented, discouraged
 		{"github/get_*", "github/get_x/deep", false}, // wildcard stays in final segment
 		{"gith*", "github", true},
 		{"gith*", "github/x", false}, // no crossing segment boundaries

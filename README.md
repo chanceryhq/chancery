@@ -32,6 +32,21 @@ Every action is attributed to a specific agent, version, and delegation
 chain — and a delegated writ can only ever narrow: the block format has
 no field for widening.
 
+Enforce it live on any stdio MCP server (per-call policy, sealed
+secrets injected server-side only, revocation on the next call):
+
+```sh
+./chancery secret put github-token --from-file ./token
+./chancery mcp wrap --agent deploy-bot --writ <writ-id> \
+    --secret GITHUB_TOKEN=github-token -- npx @yourorg/some-mcp-server
+```
+
+Run the control plane as an HTTP API with `./chancery serve`
+(REST/JSON under `/v1`; the admin token is printed once at `init`).
+The audit timeline is hash-chained — `./chancery audit verify` detects
+any edit, deletion, or reorder. Known MVP gaps are published in
+[RFC-009 §5](rfcs/009-threat-model.md).
+
 ## Design RFCs
 
 Design happens as a series of locked decisions, one RFC at a time
@@ -42,12 +57,12 @@ Design happens as a series of locked decisions, one RFC at a time
 | [000](rfcs/000-vision-and-plan.md) | Vision and plan | In Review |
 | [001](rfcs/001-agent-identity-model.md) | Agent identity model | In Review |
 | [002](rfcs/002-lineage-and-delegation.md) | Lineage and delegation | In Review |
-| 003 | Credential broker | — |
-| 004 | Policy and authorization | — |
-| 005 | Runtime enforcement (MCP → HTTP → shell → browser) | — |
-| 006 | Audit and attribution | — |
-| 007 | Lifecycle and revocation | — |
-| 008 | Data model and APIs | — |
-| 009 | Threat model | — |
+| [003](rfcs/003-credential-broker.md) | Credential broker | In Review |
+| [004](rfcs/004-policy-and-authorization.md) | Policy and authorization | In Review |
+| [005](rfcs/005-runtime-enforcement.md) | Runtime enforcement (MCP → HTTP → shell → browser) | In Review |
+| [006](rfcs/006-audit-and-attribution.md) | Audit and attribution | In Review |
+| [007](rfcs/007-lifecycle-and-revocation.md) | Lifecycle and revocation | In Review |
+| [008](rfcs/008-data-model-and-apis.md) | Data model and APIs | In Review |
+| [009](rfcs/009-threat-model.md) | Threat model | In Review |
 | 010 | MVP scope (the 90-day build) | — |
 | 011 | Open-core boundary | — |
