@@ -13,6 +13,25 @@ stored.
 
 Single Go binary. Apache-2.0 core. MCP-first, then HTTP, shell, browser.
 
+## Try it (pre-alpha)
+
+```sh
+go build -o chancery ./cmd/chancery
+./chancery init --trust-domain acme.com
+./chancery agent register deploy-bot --owner user:you@acme.com \
+    --purpose "deploys services" --prompt ./prompt.md --model claude-fable-5
+./chancery writ grant --for user:you@acme.com --to deploy-bot --cap "call:github/*"
+./chancery writ delegate <writ-id> --to test-runner --caveat "call:github/get_*"
+./chancery writ check <writ-id> --resource github/get_pull_request   # ALLOW + lineage
+./chancery writ revoke <writ-id>
+./chancery writ check <writ-id> --resource github/get_pull_request   # DENY: revoked
+./chancery audit                                                     # the timeline
+```
+
+Every action is attributed to a specific agent, version, and delegation
+chain — and a delegated writ can only ever narrow: the block format has
+no field for widening.
+
 ## Design RFCs
 
 Design happens as a series of locked decisions, one RFC at a time
@@ -22,7 +41,7 @@ Design happens as a series of locked decisions, one RFC at a time
 |-----|-------|--------|
 | [000](rfcs/000-vision-and-plan.md) | Vision and plan | In Review |
 | [001](rfcs/001-agent-identity-model.md) | Agent identity model | In Review |
-| 002 | Lineage and delegation | — |
+| [002](rfcs/002-lineage-and-delegation.md) | Lineage and delegation | In Review |
 | 003 | Credential broker | — |
 | 004 | Policy and authorization | — |
 | 005 | Runtime enforcement (MCP → HTTP → shell → browser) | — |
