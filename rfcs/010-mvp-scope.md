@@ -77,9 +77,12 @@ REST/JSON API + `serve`, adversarial JOSE suite, live integration test.
 7. **Go SDK v0** (`chancery.Run` self-registration helper) — the
    ergonomics layer over the proxy, explicitly advisory (RFC-005 §3-A
    framing in its README). *(weeks 7–8)*
-8. **Docs site** on chancery.dev (registered — founder action item is
-   now overdue): quickstart, concepts (agent/version/instance/writ),
-   RFC index, SECURITY.md. *(weeks 8–10)*
+8. **Docs site** on GitHub Pages (chanceryhq.github.io — free) —
+   quickstart, concepts (agent/version/instance/writ), RFC index,
+   SECURITY.md. chancery.dev (~$12/yr, verified available 2026-07-04)
+   is deferred until revenue by founder decision, accepting the
+   squatting risk on a name that becomes public at launch; if bought
+   later it aliases onto Pages with zero migration. *(weeks 8–10)*
 9. **Design-partner motion:** 10 conversations from MCP/platform
    communities; 3 external users running `wrap` in a real workflow
    before tag. *(weeks 6–12, parallel)*
@@ -151,7 +154,7 @@ server; the live version uses a real one).
 
 Launch inherits RFC-009 verbatim: SECURITY.md carries the gap table
 G1–G9 with phases; cosign + SBOM on every artifact; the adversarial
-suite is a CI gate; vulnerability reporting via security@chancery.dev.
+suite is a CI gate; vulnerability reporting via GitHub private vulnerability reporting.
 
 ## 9. Build consequence
 

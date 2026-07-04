@@ -7,9 +7,10 @@ Agentic Top 10 mappings, abuse cases).
 
 ## Reporting a vulnerability
 
-Email **security@chancery.dev** (GPG key published at launch). Please
-do not open public issues for vulnerabilities. Target response: 48h
-acknowledgment, 90-day coordinated disclosure.
+Use **GitHub private vulnerability reporting** on this repository
+(Security tab → "Report a vulnerability"). Please do not open public
+issues for vulnerabilities. Target response: 48h acknowledgment,
+90-day coordinated disclosure.
 
 ## Known limitations (pre-alpha) — the honest gap table
 
