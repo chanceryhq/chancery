@@ -147,7 +147,30 @@ cosign signing + SBOM in the release pipeline; deployment guidance
 (seal-key separation, localhost bind, fronted TLS); the adversarial test
 suite (below) as a permanent CI gate.
 
-## 7. Build consequence (this RFC's tests)
+## 7. Addendum A (2026-07-04): OWASP Top 10 for Agentic Applications (2026) mapping
+
+The ASI list (ASI01-ASI10) supersedes the LLM Top 10 as the audit
+checklist for agentic systems; the LLM mapping above stays for
+continuity.
+
+| # | Risk | Chancery's answer |
+|---|------|-------------------|
+| ASI01 | Agent goal hijack | Cannot prevent hijack of the model; bounds its blast radius — a hijacked agent still holds only its writ (RFC-002/005) |
+| ASI02 | Tool misuse & exploitation | Core: per-call PDP, allow-lists, writ caps; argument-schema constraints are the G4 roadmap |
+| ASI03 | **Identity & privilege abuse** | The product: governable identities (RFC-001), attenuating privilege (RFC-002), terminal revocation (RFC-007) |
+| ASI04 | Agentic supply chain | Partial: server namespace pinning, cosign/SBOM releases (RFC-010); MCP-server provenance registry is roadmap |
+| ASI05 | Unexpected code execution | The exec verb phase (RFC-005 sequence); today: shell tools simply aren't granted |
+| ASI06 | Memory & context poisoning | **Out of scope, deliberately:** we govern actions, not cognition — poisoned memory's damage is realized through actions, and actions are what we bound. Stated as the scope line, not hidden |
+| ASI07 | Insecure inter-agent communication | Writs + lineage are the authenticated delegation substrate; cross-org is the federation phase (RFC-000 Addendum A, Q6) |
+| ASI08 | Cascading failures | Depth/TTL/caveat bounds contain delegation trees; subtree revocation is the circuit breaker (tested live) |
+| ASI09 | Human-agent trust exploitation | Approvals (hold, RFC-004 L4, v1) put the human decision outside the agent's persuasion channel |
+| ASI10 | Rogue agents | Registry + version digests detect drift-by-change; instant revocation + audit timeline are the response; behavioral anomaly detection is observability-phase, on top of our data |
+
+MAESTRO (CSA) is adopted as the *process* reference for future per-RFC
+threat walks (its layer model maps cleanly onto our components); this
+document remains the product threat model of record.
+
+## 8. Build consequence (this RFC's tests)
 
 `internal/writ` and `internal/identity` gain an adversarial suite:
 `alg:none` rejection (both token types), HS256 key-confusion rejection,

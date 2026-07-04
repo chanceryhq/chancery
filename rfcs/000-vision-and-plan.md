@@ -428,7 +428,48 @@ RFC is locked when its decision has a build consequence scheduled.
 
 ---
 
-## 11. What gets built (this RFC's build consequence)
+## 11. Addendum A (2026-07-04): the extended question set
+
+Research review at series close (OWASP Agentic Security Initiative /
+Top 10 for Agentic Applications 2026, CSA MAESTRO + Agentic AI IAM,
+Gartner guardian-agents Market Guide and agent-sprawl guidance) showed
+the five defining questions are all **outbound and known-population**:
+our agents, acting on services, already registered. Two questions were
+missing and are hereby added to the invariant test:
+
+6. **Inbound and agent-to-agent:** when an agent — another team's,
+   another org's, a vendor's SaaS agent — initiates contact with YOUR
+   agents or systems, how is it identified, verified, and bounded?
+   (OWASP ASI07; only ~24% of orgs report visibility into
+   agent-to-agent communication.) This is the federation phase's
+   demand-side justification, not a v3 nicety: A2A traffic exists today
+   and is unauthenticated by default.
+7. **The unregistered agent:** how do you notice the agents that never
+   registered? NHI *scanning* remains a non-goal (RFC-000 §9) — but
+   **observation at the enforcement points we already hold** is in
+   scope: a Chancery proxy or API can see and flag unregistered actors
+   at the choke point (shadow-agent events in the audit stream), which
+   is discovery as a byproduct of enforcement rather than a sales-led
+   scanner. Gartner's agent-sprawl guidance makes inventory step one;
+   our answer is "register here and the inventory builds itself — and
+   the proxy tells you who hasn't."
+
+Category-vocabulary notes (positioning, not architecture): Gartner's
+guardian-agents Market Guide (Feb 2026) is the analyst box we will be
+placed in — position Chancery as the **deterministic** guardian layer
+(signed policy, not an LLM supervising LLMs; our decisions are
+reproducible in court, theirs are probabilistic). Gartner's
+proportional-governance finding (uniform controls across autonomy
+levels fail) maps directly onto writ templates — autonomy tiers are
+policy packs over the existing mechanism (v1), not a new mechanism.
+Gartner's "40% of enterprises will demote or decommission agents by
+2027 due to governance gaps found in production" is the demo's opening
+line. CSA's Agentic AI IAM blueprint (DIDs + verifiable credentials):
+we stay JOSE/SPIFFE for running code; a VC-compatible *export* of agent
+identity is the federation-phase representation layer, recorded for
+federation scoping.
+
+## 12. What gets built (this RFC's build consequence)
 
 1. This repo, initialized: README, RFC template, this RFC. ✅ (this commit)
 2. Register **chancery.dev** and the **chanceryhq** GitHub org. (Founder
