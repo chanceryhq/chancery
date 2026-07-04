@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/chanceryhq/chancery/internal/identity"
+	"github.com/chanceryhq/chancery/internal/seal"
 	"github.com/chanceryhq/chancery/internal/store"
 	"github.com/chanceryhq/chancery/internal/writ"
 )
@@ -83,7 +84,7 @@ func main() {
 	}
 	root.PersistentFlags().StringVar(&dataDir, "data-dir", defaultDataDir(), "state directory")
 
-	root.AddCommand(initCmd(), agentCmd(), instanceCmd(), tokenCmd(), writCmd(), auditCmd())
+	root.AddCommand(initCmd(), agentCmd(), instanceCmd(), tokenCmd(), writCmd(), auditCmd(), secretCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -651,6 +652,95 @@ func writCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(grant, delegate, show, check, revoke, list)
+	return cmd
+}
+
+func secretCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "secret", Short: "Manage sealed downstream credentials (RFC-003)"}
+
+	var value, fromFile, kind string
+	put := &cobra.Command{
+		Use:   "put <name>",
+		Short: "Seal a credential — agents never see it; rotation is re-running this",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			v := value
+			if fromFile != "" {
+				raw, err := os.ReadFile(fromFile)
+				if err != nil {
+					return err
+				}
+				v = strings.TrimRight(string(raw), "\n")
+			}
+			if v == "" {
+				return fmt.Errorf("provide --value or --from-file")
+			}
+			ss, err := seal.Open(dataDir)
+			if err != nil {
+				return err
+			}
+			if err := ss.Put(args[0], kind, v); err != nil {
+				return err
+			}
+			e.st.Audit(store.AuditEvent{Event: "secret.put", Reason: "name=" + args[0] + " kind=" + kind})
+			fmt.Printf("sealed %s (%s)\n", args[0], kind)
+			return nil
+		},
+	}
+	put.Flags().StringVar(&value, "value", "", "credential value (prefer --from-file)")
+	put.Flags().StringVar(&fromFile, "from-file", "", "read value from file")
+	put.Flags().StringVar(&kind, "kind", "static", "credential class")
+
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List sealed credentials (names and kinds only — never values)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ss, err := seal.Open(dataDir)
+			if err != nil {
+				return err
+			}
+			metas, err := ss.List()
+			if err != nil {
+				return err
+			}
+			rows := [][]string{{"NAME", "KIND", "UPDATED"}}
+			for _, m := range metas {
+				rows = append(rows, []string{m.Name, m.Kind, m.UpdatedAt.Format(time.RFC3339)})
+			}
+			table(rows)
+			return nil
+		},
+	}
+
+	rm := &cobra.Command{
+		Use:   "rm <name>",
+		Short: "Delete a sealed credential",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			ss, err := seal.Open(dataDir)
+			if err != nil {
+				return err
+			}
+			if err := ss.Delete(args[0]); err != nil {
+				return err
+			}
+			e.st.Audit(store.AuditEvent{Event: "secret.rm", Reason: "name=" + args[0]})
+			fmt.Printf("deleted %s\n", args[0])
+			return nil
+		},
+	}
+
+	cmd.AddCommand(put, list, rm)
 	return cmd
 }
 
