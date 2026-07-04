@@ -111,6 +111,11 @@ CREATE TABLE IF NOT EXISTS writ_blocks (
 	to_agent TEXT NOT NULL, exp TIMESTAMP NOT NULL,
 	created_at TIMESTAMP NOT NULL, revoked_at TIMESTAMP
 );
+CREATE TABLE IF NOT EXISTS tool_allowlists (
+	agent_id TEXT NOT NULL REFERENCES agents(id),
+	pattern TEXT NOT NULL,
+	PRIMARY KEY (agent_id, pattern)
+);
 CREATE TABLE IF NOT EXISTS audit_events (
 	id TEXT PRIMARY KEY, at TIMESTAMP NOT NULL,
 	event TEXT NOT NULL,
@@ -313,6 +318,46 @@ func (s *Store) ListInstances(agentID string) ([]Instance, error) {
 			return nil, err
 		}
 		out = append(out, in)
+	}
+	return out, rows.Err()
+}
+
+// --- tool allow-lists (RFC-004 L2) ---
+
+// SetAllowlist replaces an agent's tool allow-list. Patterns are
+// validated by the caller (policy grammar); empty list = no additional
+// restriction.
+func (s *Store) SetAllowlist(agentID string, patterns []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM tool_allowlists WHERE agent_id = ?`, agentID); err != nil {
+		return err
+	}
+	for _, p := range patterns {
+		if _, err := tx.Exec(`INSERT INTO tool_allowlists (agent_id, pattern) VALUES (?, ?)`,
+			agentID, p); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetAllowlist(agentID string) ([]string, error) {
+	rows, err := s.db.Query(`SELECT pattern FROM tool_allowlists WHERE agent_id = ? ORDER BY pattern`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
 	}
 	return out, rows.Err()
 }

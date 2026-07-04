@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	"github.com/chanceryhq/chancery/internal/policy"
 )
 
 const DefaultMaxDepth = 4
@@ -26,56 +28,14 @@ var (
 	ErrExpired       = errors.New("writ: expired")
 )
 
-// Cap is a capability or caveat pattern: a verb and a resource pattern.
-// Resource patterns are exact strings or trailing-'*' prefixes; the full
-// grammar belongs to RFC-004 — the intersection algebra is locked here.
-type Cap struct {
-	Verb     string `json:"verb"`
-	Resource string `json:"resource"`
-}
+// Cap is a capability or caveat pattern. The grammar and matching
+// semantics are owned by internal/policy (RFC-004): one implementation
+// shared by grants, caveats, and allow-lists. The intersection algebra
+// remains locked here (RFC-002).
+type Cap = policy.Cap
 
-func (c Cap) String() string { return c.Verb + ":" + c.Resource }
-
-// ParseCap parses "verb:resource" (resource may contain ':').
-func ParseCap(s string) (Cap, error) {
-	verb, resource, ok := strings.Cut(s, ":")
-	if !ok || verb == "" || resource == "" {
-		return Cap{}, fmt.Errorf("writ: capability %q is not verb:resource", s)
-	}
-	return Cap{Verb: verb, Resource: resource}, nil
-}
-
-// matches reports whether the pattern admits the concrete (verb, resource).
-func (c Cap) matches(verb, resource string) bool {
-	if c.Verb != "*" && c.Verb != verb {
-		return false
-	}
-	if p, ok := strings.CutSuffix(c.Resource, "*"); ok {
-		return strings.HasPrefix(resource, p)
-	}
-	return c.Resource == resource
-}
-
-// overlaps reports whether two patterns can admit at least one common
-// action — used to refuse null-authority delegations at append time
-// (RFC-002 §7, caveat starvation).
-func (c Cap) overlaps(o Cap) bool {
-	if c.Verb != "*" && o.Verb != "*" && c.Verb != o.Verb {
-		return false
-	}
-	cp, cw := strings.CutSuffix(c.Resource, "*")
-	op, ow := strings.CutSuffix(o.Resource, "*")
-	switch {
-	case cw && ow:
-		return strings.HasPrefix(cp, op) || strings.HasPrefix(op, cp)
-	case cw:
-		return strings.HasPrefix(o.Resource, cp)
-	case ow:
-		return strings.HasPrefix(c.Resource, op)
-	default:
-		return c.Resource == o.Resource
-	}
-}
+// ParseCap parses and validates "verb:resource-pattern".
+func ParseCap(s string) (Cap, error) { return policy.ParseCap(s) }
 
 // Block is one link in the chain. Exactly one of Cap (idx 0) or Caveat
 // (idx > 0) is populated — enforced structurally at append and at verify.
@@ -165,7 +125,7 @@ func Delegate(w *Writ, to, toVer string, caveats []Cap, exp time.Time,
 	for _, cv := range caveats {
 		ok := false
 		for _, c := range root.Cap {
-			if cv.overlaps(c) {
+			if cv.Overlaps(c) {
 				ok = true
 				break
 			}
@@ -236,7 +196,7 @@ func Verify(jwsChain []string, pub *ecdsa.PublicKey, at time.Time) (*Writ, error
 func (w *Writ) Check(verb, resource string) bool {
 	ok := false
 	for _, c := range w.Blocks[0].Cap {
-		if c.matches(verb, resource) {
+		if c.Matches(verb, resource) {
 			ok = true
 			break
 		}
@@ -250,7 +210,7 @@ func (w *Writ) Check(verb, resource string) bool {
 		}
 		ok = false
 		for _, cv := range b.Caveat {
-			if cv.matches(verb, resource) {
+			if cv.Matches(verb, resource) {
 				ok = true
 				break
 			}

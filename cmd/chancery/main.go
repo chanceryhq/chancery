@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/chanceryhq/chancery/internal/identity"
+	"github.com/chanceryhq/chancery/internal/policy"
 	"github.com/chanceryhq/chancery/internal/seal"
 	"github.com/chanceryhq/chancery/internal/store"
 	"github.com/chanceryhq/chancery/internal/writ"
@@ -256,7 +257,46 @@ func agentCmd() *cobra.Command {
 		}
 	}
 
-	cmd.AddCommand(register, list, describe,
+	var toolPatterns []string
+	allow := &cobra.Command{
+		Use:   "allow <name>",
+		Short: "Set an agent's tool allow-list (RFC-004 L2; subtractive — only the writ grants)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			a, err := e.st.GetAgentByName(args[0])
+			if err != nil {
+				return err
+			}
+			for _, p := range toolPatterns {
+				if p == policy.DenyAll {
+					continue
+				}
+				if err := policy.ValidateResourcePattern(p); err != nil {
+					return err
+				}
+			}
+			if err := e.st.SetAllowlist(a.ID, toolPatterns); err != nil {
+				return err
+			}
+			e.st.Audit(store.AuditEvent{Event: "agent.allowlist", AgentID: a.ID,
+				Reason: "patterns=" + strings.Join(toolPatterns, ",")})
+			if len(toolPatterns) == 0 {
+				fmt.Printf("%s: allow-list cleared (writ authority still binds)\n", args[0])
+			} else {
+				fmt.Printf("%s: allow-list set to %s\n", args[0], strings.Join(toolPatterns, ", "))
+			}
+			return nil
+		},
+	}
+	allow.Flags().StringSliceVar(&toolPatterns, "tool", nil,
+		"allowed tool pattern (repeatable; empty clears; '!none' denies all)")
+
+	cmd.AddCommand(register, list, describe, allow,
 		state("suspend", "Suspend an agent (reversible)", store.StateSuspended),
 		state("resume", "Reactivate a suspended agent", store.StateActive),
 		state("revoke", "Revoke an agent identity — kills all versions and instances", store.StateRevoked))
@@ -584,12 +624,21 @@ func writCmd() *cobra.Command {
 			if err != nil {
 				return deny(err.Error())
 			}
-			if !w.Check(verb, resource) {
-				return deny("outside effective authority (grant ∩ caveats)")
+			// The acting principal is the leaf block's agent; its
+			// allow-list joins the PDP conjunction (RFC-004).
+			var allowlist []string
+			leafURI := w.Blocks[len(w.Blocks)-1].To
+			if name, ok := strings.CutPrefix(leafURI, "spiffe://"+e.iss.TrustDomain+"/agent/"); ok {
+				if a, err := e.st.GetAgentByName(name); err == nil {
+					allowlist, _ = e.st.GetAllowlist(a.ID)
+				}
+			}
+			d := policy.Decide(w, allowlist, verb, resource)
+			if d.Effect != policy.Allow {
+				return deny("[" + d.Layer + "] " + d.Reason)
 			}
 			e.st.Audit(store.AuditEvent{Event: "action.check", WritID: args[0],
-				Verb: verb, Resource: resource, Decision: "ALLOW",
-				Reason: "lineage " + strings.Join(w.Lineage(), " -> ")})
+				Verb: verb, Resource: resource, Decision: "ALLOW", Reason: d.Reason})
 			fmt.Printf("ALLOW  %s:%s\n  lineage: %s\n", verb, resource, strings.Join(w.Lineage(), " -> "))
 			return nil
 		},
