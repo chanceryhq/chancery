@@ -30,6 +30,7 @@ security is never paywalled ([RFC-011](rfcs/011-open-core-boundary.md)).
 | G8 | No key-rotation automation | Slow recovery from issuer-key compromise | v1 |
 | G9 | Declared (unverified) runtime attestation | An instance can lie about where it runs | v1 (verifiers) |
 | G10 | Writ-gated spawn (`/v1/spawn`) is capability-URL style, no proof-of-possession | Knowing a writ id + parent agent name acts as bearer, bounded by that writ's own spawn capability and template ceiling | v1 (PoP via the writ's reserved `dk` field, [RFC-012](rfcs/012-dynamic-agent-creation.md)) |
+| G11 | Browser URL guard is heuristic in MVP | Only top-level `url`/`uri` tool arguments are net-checked, against the *requested* URL (server-side redirects unseen); in-page actions are tool-level only | v1 (per-server argument schemas) / v2 (CDP-native PEP, [RFC-013](rfcs/013-browser-sessions-and-tokens.md)) |
 
 ## Deployment guidance
 

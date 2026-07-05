@@ -314,3 +314,24 @@ func TestExpiredEphemeralIsDeniedAndSwept(t *testing.T) {
 	}
 	_ = child
 }
+
+func TestGrantsVerbDetectsNetCaps(t *testing.T) {
+	// RFC-013: granting net:… is the opt-in signal for the URL guard.
+	s := testService(t)
+	s.RegisterAgent("web-bot", "user:a@acme.com", "t", "p", "c", "tl", "m")
+	wNet, _, err := s.GrantWrit("user:a@acme.com", "web-bot",
+		[]string{"call:browser/*", "net:github.com/*"}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wCall, _, err := s.GrantWrit("user:a@acme.com", "web-bot", []string{"call:browser/*"}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.GrantsVerb(wNet, "", "net") {
+		t.Error("writ with net caps must report GrantsVerb(net)")
+	}
+	if s.GrantsVerb(wCall, "", "net") {
+		t.Error("call-only writ must not report GrantsVerb(net)")
+	}
+}

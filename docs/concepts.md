@@ -79,6 +79,28 @@ per call, with fresh registry state:
 Because state is read per call, **revocation takes effect on the next
 action** — no propagation delay, no CRL, no cache to expire.
 
+## Browser sessions (the credential agents actually inherit)
+
+A browser agent doesn't log in — it inherits a human's cookies, which
+authorize everything, attenuate nothing, and are invisible to the IdP.
+RFC-013 applies the two rules above to them:
+
+- **Session = sealed credential.** Storage state (cookies) lives
+  AEAD-sealed; `mcp wrap --secret-file` materializes it as a private
+  file only the browser *server* reads, deleted when the session ends.
+  The agent's context never contains a cookie.
+- **Navigation = action.** Granting `net:github.com/*` on the writ
+  turns on the URL guard: every `url` tool argument is checked as
+  `net:<host>/<path>` per call, fail-closed (non-http schemes and
+  unexpressable URLs are denied). Query strings never reach policy or
+  audit.
+- **Session = instance.** `chancery instance revoke` is the kill
+  switch browser sessions never had.
+
+See [the browser-agent example](https://github.com/chanceryhq/chancery/tree/main/examples/browser-agent)
+for the full Playwright MCP recipe, and RFC-013 §6 for the honest
+boundaries (top-level `url` args, requested-URL only in MVP).
+
 ## Two invariants you can rely on
 
 - **Metadata-only audit.** The audit schema has no column for prompts,

@@ -10,8 +10,11 @@ package mcp
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/chanceryhq/chancery/internal/policy"
@@ -42,6 +45,11 @@ type Proxy struct {
 	Server    string    // namespace: resources are "<Server>/<tool>"
 	Decide    Decider
 	Audit     AuditFn
+	// NetDecide, when non-nil, is the browser/URL guard (RFC-013): any
+	// tools/call whose arguments carry a "url"/"uri" string is
+	// additionally checked as net:<host>/<path> — per-navigation
+	// scoping at the same boundary. nil = guard off.
+	NetDecide Decider
 
 	mu          sync.Mutex // guards ClientOut (both loops write to it)
 	pendingList sync.Map   // request id (raw) -> struct{}: outstanding tools/list
@@ -98,7 +106,8 @@ func (p *Proxy) clientLoop() error {
 		switch env.Method {
 		case "tools/call":
 			var params struct {
-				Name string `json:"name"`
+				Name      string                     `json:"name"`
+				Arguments map[string]json.RawMessage `json:"arguments"`
 			}
 			if err := json.Unmarshal(env.Params, &params); err != nil || params.Name == "" {
 				p.deny(env.ID, params.Name, policy.Decision{
@@ -110,6 +119,14 @@ func (p *Proxy) clientLoop() error {
 			if d.Effect != policy.Allow {
 				p.deny(env.ID, params.Name, d)
 				continue
+			}
+			// URL guard (RFC-013): the tool is allowed — is the
+			// destination? Checked against the writ's net capabilities;
+			// fail closed on URLs the grammar cannot express.
+			if p.NetDecide != nil {
+				if blocked := p.checkNet(env.ID, params.Name, params.Arguments); blocked {
+					continue
+				}
 			}
 			// Audit BEFORE forwarding: if the record cannot be written,
 			// the action does not happen (RFC-006 §7).
@@ -129,6 +146,100 @@ func (p *Proxy) clientLoop() error {
 		}
 	}
 	return sc.Err()
+}
+
+// urlArgKeys are the argument names the URL guard inspects. Browser
+// MCP servers (Playwright, Puppeteer, fetch) all take the destination
+// as a top-level "url" (occasionally "uri") string argument.
+var urlArgKeys = []string{"url", "uri"}
+
+// checkNet evaluates every URL argument as net:<host>/<path> and denies
+// the call if any is outside the writ's net authority. Returns true if
+// the call was blocked. Unexpressable URLs are DENIED, not skipped:
+// a guard that can be confused into silence is not a guard.
+func (p *Proxy) checkNet(id json.RawMessage, tool string, args map[string]json.RawMessage) bool {
+	for _, key := range urlArgKeys {
+		raw, ok := args[key]
+		if !ok {
+			continue
+		}
+		var u string
+		if err := json.Unmarshal(raw, &u); err != nil {
+			continue // not a string: nothing navigable
+		}
+		res, err := URLToResource(u)
+		if err != nil {
+			// Audit the scheme+host shape only — a raw URL can carry
+			// query-string secrets, and audit is metadata-only (D6).
+			safe, _, _ := strings.Cut(u, "?")
+			if len(safe) > 128 {
+				safe = safe[:128]
+			}
+			p.denyNet(id, tool, safe, policy.Decision{Effect: policy.Deny, Layer: "grammar",
+				Reason: "url not expressible in the capability grammar: " + err.Error()})
+			return true
+		}
+		if d := p.NetDecide(res); d.Effect != policy.Allow {
+			p.denyNet(id, tool, res, d)
+			return true
+		}
+		p.audit("mcp.net", res, "ALLOW", "tool="+p.Server+"/"+tool)
+	}
+	return false
+}
+
+// denyNet answers a URL-guard denial, auditing the net resource (host/
+// path only — query strings and fragments are payload and never leave
+// URLToResource).
+func (p *Proxy) denyNet(id json.RawMessage, tool, res string, d policy.Decision) {
+	p.audit("mcp.net", res, "DENY", "["+d.Layer+"] "+d.Reason+" tool="+p.Server+"/"+tool)
+	if id == nil {
+		return
+	}
+	resp, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      json.RawMessage(id),
+		"error": map[string]any{
+			"code":    DeniedCode,
+			"message": fmt.Sprintf("chancery: navigation denied by %s policy: %s", d.Layer, d.Reason),
+		},
+	})
+	p.writeClient(resp)
+}
+
+// URLToResource maps a URL to a net-verb resource: lowercased host,
+// then path segments — "https://GitHub.com/acme/repo?x=1#f" →
+// "github.com/acme/repo". Query strings, fragments, and userinfo are
+// dropped (payload, never policy or audit material). Errors on
+// anything the capability grammar cannot express — schemes other than
+// http(s), empty hosts, credentials in the URL, or path characters
+// outside [a-z0-9_.-] after lowercasing.
+func URLToResource(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return "", fmt.Errorf("scheme %q is not http(s)", u.Scheme)
+	}
+	if u.User != nil {
+		return "", errors.New("userinfo in url")
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return "", errors.New("empty host")
+	}
+	res := host
+	for _, seg := range strings.Split(strings.Trim(u.Path, "/"), "/") {
+		if seg == "" {
+			continue
+		}
+		res += "/" + strings.ToLower(seg)
+	}
+	if err := policy.ValidateResource(res); err != nil {
+		return "", err
+	}
+	return res, nil
 }
 
 // deny answers a tools/call with a protocol-native JSON-RPC error and

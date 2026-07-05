@@ -289,3 +289,136 @@ func TestAuditFailureDeniesAllowedCall(t *testing.T) {
 		t.Fatal("timed out")
 	}
 }
+
+// --- RFC-013: the URL guard ---
+
+func newNetHarness(t *testing.T, decide, netDecide Decider) *harness {
+	t.Helper()
+	clientR, clientW := io.Pipe()
+	proxyR, proxyW := io.Pipe()
+	serverInR, serverInW := io.Pipe()
+	serverOutR, serverOutW := io.Pipe()
+	h := &harness{toProxy: clientW, fromProxy: bufio.NewScanner(proxyR)}
+	p := &Proxy{
+		ClientIn: clientR, ClientOut: proxyW,
+		ServerIn: serverInW, ServerOut: serverOutR,
+		Server: "browser", Decide: decide, NetDecide: netDecide,
+		Audit: func(event, tool, decision, reason string) error {
+			h.mu.Lock()
+			h.auditTrail = append(h.auditTrail, auditRec{event, tool, decision, reason})
+			h.mu.Unlock()
+			return nil
+		},
+	}
+	go fakeServer(t, serverInR, serverOutW)
+	go p.Run()
+	return h
+}
+
+func TestURLToResource(t *testing.T) {
+	cases := []struct {
+		in, want string
+		wantErr  bool
+	}{
+		{"https://GitHub.com/Acme/Repo?token=secret#frag", "github.com/acme/repo", false},
+		{"https://mail.google.com/", "mail.google.com", false},
+		{"http://example.com/a/b/", "example.com/a/b", false},
+		{"file:///etc/passwd", "", true},                     // non-http scheme
+		{"https://user:pass@github.com/x", "", true},         // userinfo smuggling
+		{"https://", "", true},                               // empty host
+		{"javascript:alert(1)", "", true},                    // non-http scheme
+	}
+	for _, c := range cases {
+		got, err := URLToResource(c.in)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("URLToResource(%q) = %q, want error", c.in, got)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("URLToResource(%q) = %q, %v; want %q", c.in, got, err, c.want)
+		}
+	}
+}
+
+func TestNetGuardScopesNavigation(t *testing.T) {
+	allowAllTools := func(resource string) policy.Decision {
+		return policy.Decision{Effect: policy.Allow, Layer: "writ", Reason: "ok"}
+	}
+	onlyGithub := func(resource string) policy.Decision {
+		if strings.HasPrefix(resource, "github.com") {
+			return policy.Decision{Effect: policy.Allow, Layer: "writ", Reason: "net ok"}
+		}
+		return policy.Decision{Effect: policy.Deny, Layer: "writ", Reason: "outside net authority"}
+	}
+	h := newNetHarness(t, allowAllTools, onlyGithub)
+
+	// Allowed destination: forwarded, result comes back.
+	send(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://github.com/acme/repo"}}}`)
+	if out := recv(t, h); out["result"] == nil {
+		t.Fatalf("allowed navigation must reach the server, got %v", out)
+	}
+
+	// Denied destination: JSON-RPC error, never reaches the server.
+	send(t, h, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://evil.com/exfil"}}}`)
+	out := recv(t, h)
+	if out["error"] == nil || !strings.Contains(string(out["error"]), "navigation denied") {
+		t.Fatalf("denied navigation must return the -32001 error, got %v", out)
+	}
+
+	// Unexpressable URL: fail closed, not fail open.
+	send(t, h, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"file:///etc/passwd"}}}`)
+	if out := recv(t, h); out["error"] == nil {
+		t.Fatalf("non-http url must be denied, got %v", out)
+	}
+
+	// A call with no url argument is untouched by the guard.
+	send(t, h, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"screenshot","arguments":{}}}`)
+	if out := recv(t, h); out["result"] == nil {
+		t.Fatalf("url-less call must pass, got %v", out)
+	}
+
+	// Audit shows both net outcomes with query strings stripped.
+	sawAllow, sawDeny := false, false
+	for _, a := range h.audits() {
+		if a.event == "mcp.net" && a.decision == "ALLOW" && a.tool == "github.com/acme/repo" {
+			sawAllow = true
+		}
+		if a.event == "mcp.net" && a.decision == "DENY" && a.tool == "evil.com/exfil" {
+			sawDeny = true
+		}
+	}
+	if !sawAllow || !sawDeny {
+		t.Errorf("net decisions must be audited (allow=%v deny=%v): %+v", sawAllow, sawDeny, h.audits())
+	}
+}
+
+func TestNoNetGuardMeansNoURLChecks(t *testing.T) {
+	// Guard off (writ grants no net caps): url arguments pass untouched —
+	// backward compatible with call-only writs.
+	h := newHarness(t, func(string) policy.Decision {
+		return policy.Decision{Effect: policy.Allow, Layer: "writ", Reason: "ok"}
+	})
+	send(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"url":"https://anywhere.example/x"}}}`)
+	if out := recv(t, h); out["result"] == nil {
+		t.Fatalf("without a net guard, url args must not be evaluated, got %v", out)
+	}
+}
+
+func TestNetGuardDenialAuditsNoQueryStrings(t *testing.T) {
+	// D6 at the guard: even an unexpressable URL's audit trail must not
+	// carry query-string payload.
+	h := newNetHarness(t,
+		func(string) policy.Decision { return policy.Decision{Effect: policy.Allow, Layer: "writ", Reason: "ok"} },
+		func(string) policy.Decision { return policy.Decision{Effect: policy.Deny, Layer: "writ", Reason: "no"} })
+	send(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"ftp://host/p?apikey=hunter2"}}}`)
+	if out := recv(t, h); out["error"] == nil {
+		t.Fatalf("ftp url must be denied, got %v", out)
+	}
+	for _, a := range h.audits() {
+		if strings.Contains(a.tool, "hunter2") || strings.Contains(a.reason, "hunter2") {
+			t.Errorf("query payload leaked into audit: %+v", a)
+		}
+	}
+}

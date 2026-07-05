@@ -369,6 +369,31 @@ func (s *Service) decide(widID, leafBlockID, verb, resource string) policy.Decis
 	return policy.Decide(w, allowlist, verb, resource)
 }
 
+// GrantsVerb reports whether the writ's block-0 grant contains any
+// capability with the given verb (or the * verb). Used by PEPs to
+// auto-enable verb-specific guards — e.g. the MCP proxy turns on the
+// URL guard iff the writ grants net (RFC-013): granting net:… IS the
+// opt-in to navigation scoping.
+func (s *Service) GrantsVerb(widID, leafBlockID, verb string) bool {
+	if leafBlockID == "" {
+		b, err := s.St.LatestBlock(widID)
+		if err != nil {
+			return false
+		}
+		leafBlockID = b.ID
+	}
+	w, err := s.verifiedPath(leafBlockID)
+	if err != nil {
+		return false
+	}
+	for _, c := range w.Blocks[0].Cap {
+		if c.Verb == verb || c.Verb == "*" {
+			return true
+		}
+	}
+	return false
+}
+
 // verifiedPath loads a root→leaf block path (revocation-checked by the
 // registry) and cryptographically verifies the chain.
 func (s *Service) verifiedPath(leafBlockID string) (*writ.Writ, error) {

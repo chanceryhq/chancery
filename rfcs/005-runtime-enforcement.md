@@ -124,6 +124,14 @@ shell supervisor with argv policy (v1/v2, verb `exec`) → browser via CDP
 domain/action allow-lists (v2). Each is a new PEP against the same PDP —
 RFC-004's grammar already reserves the verbs.
 
+*Amended 2026-07-05 by RFC-013:* the first `net`-verb enforcement
+arrived early, *inside* the MCP PEP: when a writ grants `net:…`, the
+stdio proxy additionally evaluates every `url`/`uri` tool argument as
+`net:<host>/<path>` (fail-closed URL guard), and sealed browser
+session state is injected as a server-only file (`--secret-file`).
+The CDP-native browser PEP remains the v2 step; RFC-013 owns the
+browser semantics.
+
 ## 5. Why
 
 This is the wedge working end-to-end: question 2's demo (revoke → next

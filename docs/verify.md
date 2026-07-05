@@ -239,6 +239,50 @@ the writ is the authorization.
 
 ---
 
+## RFC-013 — Sessions are custodied; navigation is scoped
+
+The claim: a browser agent never holds the session, and can only
+navigate where the writ's `net:` caps allow — checked per URL,
+fail-closed. Verifiable without a real browser, because the guard
+lives in the proxy:
+
+```sh
+chancery agent register web-bot --owner user:you@acme.com --purpose "browses"
+echo '{"cookies":[{"name":"session","value":"supersecret"}]}' > /tmp/state.json
+chancery secret put test-session --from-file /tmp/state.json && rm /tmp/state.json
+
+# net caps on the writ auto-enable the URL guard:
+WB=$(chancery writ grant --for user:you@acme.com --to web-bot \
+    --cap "call:sh/*" --cap "net:github.com/*" --ttl 30m | grep -o 'w_[A-Z0-9]*' | head -1)
+
+# `cat "$STATE"` stands in for a browser server reading its storage state —
+# proving the sealed session reached the SERVER side (and only there):
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"c","arguments":{"url":"https://github.com/acme/repo?token=leak"}}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"c","arguments":{"url":"https://mail.google.com/"}}}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"c","arguments":{"url":"file:///etc/passwd"}}}' \
+| chancery mcp wrap --agent web-bot --writ $WB --server-name sh \
+    --secret-file STATE=test-session \
+    -- sh -c 'cat "$STATE" >&2; while read l; do echo "{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{}}"; done'
+```
+
+**Expect:** the sealed cookie JSON printed on *stderr* (that's the
+server process holding it — the agent-side JSON stream never contains
+it); call 1 forwarded (github.com allowed); calls 2 and 3 answered
+with `-32001 navigation denied` (outside `net:github.com/*`; non-http
+fails closed). Then:
+
+```sh
+chancery audit --limit 6
+```
+
+**Expect:** `mcp.net` events — `github.com/acme/repo` ALLOW **without
+`token=leak`** (query strings are payload, never audited), and the
+two DENYs. For the real thing, see
+[examples/browser-agent](../examples/browser-agent/README.md).
+
+---
+
 ```sh
 rm -rf "$CHANCERY_DATA"     # clean up the throwaway state
 ```

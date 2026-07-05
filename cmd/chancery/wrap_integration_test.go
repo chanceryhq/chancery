@@ -191,3 +191,152 @@ func TestMCPWrapEndToEnd(t *testing.T) {
 		t.Errorf("audit chain should verify: %s", out)
 	}
 }
+
+// browserStubSource is a browser-shaped MCP server: `navigate` takes a
+// url; `whoami` returns the storage-state file contents it was handed
+// via argv (the chancery-file: substitution) — proving the server got
+// the session while the agent side never did.
+const browserStubSource = `package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"os"
+)
+
+func main() {
+	state := ""
+	if len(os.Args) > 1 {
+		if b, err := os.ReadFile(os.Args[1]); err == nil {
+			state = string(b)
+		}
+	}
+	sc := bufio.NewScanner(os.Stdin)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+	out := json.NewEncoder(os.Stdout)
+	for sc.Scan() {
+		var req map[string]any
+		if json.Unmarshal(sc.Bytes(), &req) != nil {
+			continue
+		}
+		id, hasID := req["id"]
+		if req["method"] == "tools/call" && hasID {
+			out.Encode(map[string]any{"jsonrpc": "2.0", "id": id,
+				"result": map[string]any{"content": []map[string]any{{"type": "text", "text": state}}}})
+		}
+	}
+}
+`
+
+// TestBrowserWrapNetGuardAndSessionFile is the RFC-013 e2e: a writ with
+// net caps auto-enables per-navigation URL checks, and sealed session
+// material reaches the SERVER as a private file (via chancery-file:
+// substitution) without ever existing in the agent-side environment.
+func TestBrowserWrapNetGuardAndSessionFile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds subprocesses; skipped in -short")
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(src, []byte(browserStubSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stub := filepath.Join(dir, "browserstub")
+	bcmd := exec.Command("go", "build", "-o", stub, src)
+	bcmd.Env = append(os.Environ(), "GO111MODULE=off")
+	if out, err := bcmd.CombinedOutput(); err != nil {
+		t.Fatalf("build browser stub: %v\n%s", err, out)
+	}
+	ch := buildChancery(t)
+	data := t.TempDir()
+
+	runCLI(t, ch, data, "init", "--trust-domain", "acme.com")
+	runCLI(t, ch, data, "agent", "register", "web-bot",
+		"--owner", "user:a@acme.com", "--purpose", "t", "--prompt", "p", "--model", "m")
+
+	// Seal a fake browser storage state (cookies).
+	stateSrc := filepath.Join(dir, "state.json")
+	os.WriteFile(stateSrc, []byte(`{"cookies":[{"name":"session","value":"supersecret"}]}`), 0o600)
+	runCLI(t, ch, data, "secret", "put", "gmail-session", "--from-file", stateSrc)
+
+	// net caps on the writ => URL guard auto-enabled.
+	grant := runCLI(t, ch, data, "writ", "grant", "--for", "user:a@acme.com",
+		"--to", "web-bot", "--cap", "call:browser/*", "--cap", "net:github.com/*", "--ttl", "10m")
+	var wid string
+	for _, line := range strings.Split(grant, "\n") {
+		if strings.HasPrefix(line, "writ ") {
+			wid = strings.Fields(line)[1]
+		}
+	}
+	if wid == "" {
+		t.Fatalf("no writ id in:\n%s", grant)
+	}
+
+	cmd := exec.Command(ch, "mcp", "wrap", "--agent", "web-bot", "--writ", wid,
+		"--server-name", "browser", "--secret-file", "STATE=gmail-session",
+		"--", stub, "chancery-file:STATE")
+	cmd.Env = append(os.Environ(), "CHANCERY_DATA="+data)
+	stdin, _ := cmd.StdinPipe()
+	stdout, _ := cmd.StdoutPipe()
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	sc := bufio.NewScanner(stdout)
+	sc.Buffer(make([]byte, 1<<20), 1<<20)
+
+	rpc := func(msg string) map[string]json.RawMessage {
+		stdin.Write([]byte(msg + "\n"))
+		done := make(chan map[string]json.RawMessage, 1)
+		go func() {
+			var m map[string]json.RawMessage
+			if sc.Scan() {
+				json.Unmarshal(sc.Bytes(), &m)
+			}
+			done <- m
+		}()
+		select {
+		case m := <-done:
+			return m
+		case <-time.After(10 * time.Second):
+			t.Fatal("timeout awaiting proxy response")
+			return nil
+		}
+	}
+
+	// 1) The server holds the session (chancery-file: substitution worked)…
+	resp := rpc(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"whoami","arguments":{}}}`)
+	if resp["result"] == nil || !strings.Contains(string(resp["result"]), "supersecret") {
+		t.Fatalf("server must have received the sealed session file: %v", resp)
+	}
+
+	// 2) Navigation inside the net grant passes.
+	resp = rpc(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://github.com/acme/repo?token=x"}}}`)
+	if resp["result"] == nil {
+		t.Fatalf("granted navigation must pass: %v", resp)
+	}
+
+	// 3) Navigation outside it is denied in-path.
+	resp = rpc(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://evil.example/exfil"}}}`)
+	if resp["error"] == nil || !strings.Contains(string(resp["error"]), "navigation denied") {
+		t.Fatalf("out-of-grant navigation must be denied: %v", resp)
+	}
+
+	// 4) file:// smuggling fails closed.
+	resp = rpc(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"file:///etc/passwd"}}}`)
+	if resp["error"] == nil {
+		t.Fatalf("non-http navigation must be denied: %v", resp)
+	}
+
+	stdin.Close()
+	cmd.Wait()
+
+	// 5) The audit stream has the net decisions, query string stripped.
+	audit := runCLI(t, ch, data, "audit", "--limit", "20")
+	if !strings.Contains(audit, "github.com/acme/repo") || strings.Contains(audit, "token=x") {
+		t.Errorf("audit must carry net resources without query payload:\n%s", audit)
+	}
+	if !strings.Contains(audit, "evil.example/exfil") {
+		t.Errorf("denied navigation must be audited:\n%s", audit)
+	}
+}

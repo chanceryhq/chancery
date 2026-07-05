@@ -422,6 +422,7 @@ named after.
 | 010 mvp-scope | The 90-day cutlines, demo script, launch checklist | all above | **Yes** |
 | 011 open-core-boundary | Module boundary, license enforcement, tenancy seams | 000, 008 | Boundary *placeholder* now (D2); locked before enterprise work |
 | 012 dynamic-agent-creation | Writ-gated runtime spawn: templates, `admin` verb, ephemeral lifecycle | 001, 002, 004, 007, 008 | Added 2026-07-05 from dogfooding: orchestrators that create agents at runtime are the common case, not the edge case |
+| 013 browser-sessions-and-tokens | Sessions as sealed credentials; `net` verb semantics; the URL guard | 001–005 | Added 2026-07-05: browser agents inherit human sessions — the top-named 2026 enterprise concern, unanswered at the identity layer |
 
 Order of writing: **001 → 002 → 003 → 005 → 006 → 007 → 008 → 010**, with
 004, 009, 011 drafted in parallel and locked later. One RFC at a time; an

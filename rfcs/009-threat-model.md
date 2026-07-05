@@ -140,6 +140,7 @@ phase. A threat model that hides its gaps is marketing.
 | G8 | No key-rotation runbook/automation | Slow recovery from issuer-key compromise | v1 |
 | G9 | Declared attestation | Instance can lie about runtime | RFC-001 verifiers · v1 |
 | G10 | Writ-gated spawn is capability-URL (no PoP) | Knowing writ+agent ids ≈ bearer for `/v1/spawn`, bounded by the writ's own PDP gate | RFC-012 · v1 (`dk` proof-of-possession) |
+| G11 | URL guard coverage is heuristic | Only top-level `url`/`uri` args checked; requested URL only (server-side redirects unseen); in-page actions not URL-shaped | RFC-013 · v1 (argument schemas) / v2 (CDP PEP) |
 
 ## 6. What this means for RFC-010
 

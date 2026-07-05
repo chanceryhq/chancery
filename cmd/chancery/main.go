@@ -826,7 +826,8 @@ func mcpCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "mcp", Short: "Runtime enforcement for MCP servers (RFC-005)"}
 
 	var agentName, writID, blockID, serverName string
-	var secretMaps []string
+	var secretMaps, secretFileMaps []string
+	var netGuard bool
 	wrap := &cobra.Command{
 		Use:   "wrap --agent <name> --writ <id> -- <server command> [args...]",
 		Short: "Run an MCP server behind Chancery: per-call policy, audit, sealed secrets",
@@ -894,7 +895,7 @@ func mcpCmd() *cobra.Command {
 					childEnv = append(childEnv, k+"="+val)
 				}
 			}
-			if len(secretMaps) > 0 {
+			if len(secretMaps) > 0 || len(secretFileMaps) > 0 {
 				ss, err := seal.Open(dataDir)
 				if err != nil {
 					return err
@@ -909,6 +910,38 @@ func mcpCmd() *cobra.Command {
 						return fmt.Errorf("refusing to start: %w", err)
 					}
 					childEnv = append(childEnv, envVar+"="+val)
+				}
+				// Sealed FILE injection (RFC-013): session material —
+				// e.g. a browser storage-state with cookies — is
+				// materialized 0600 in a private run dir the SERVER
+				// reads; the agent-side context never sees it. The dir
+				// is shredded when the session ends.
+				if len(secretFileMaps) > 0 {
+					runDir, err := os.MkdirTemp("", "chancery-run-")
+					if err != nil {
+						return err
+					}
+					defer os.RemoveAll(runDir)
+					for _, m := range secretFileMaps {
+						key, name, ok := strings.Cut(m, "=")
+						if !ok {
+							return fmt.Errorf("--secret-file %q is not NAME=sealed-name", m)
+						}
+						val, err := ss.Get(name)
+						if err != nil {
+							return fmt.Errorf("refusing to start: %w", err)
+						}
+						fpath := filepath.Join(runDir, key)
+						if err := os.WriteFile(fpath, []byte(val), 0o600); err != nil {
+							return err
+						}
+						childEnv = append(childEnv, key+"="+fpath)
+						// Server args may reference the file as
+						// chancery-file:NAME (e.g. --storage-state=chancery-file:STATE).
+						for i := range args {
+							args[i] = strings.ReplaceAll(args[i], "chancery-file:"+key, fpath)
+						}
+					}
 				}
 			}
 
@@ -928,8 +961,12 @@ func mcpCmd() *cobra.Command {
 			}
 
 			audit := func(event, tool, decision, reason string) error {
+				verb := "call"
+				if event == "mcp.net" {
+					verb = "net"
+				}
 				return e.st.Audit(store.AuditEvent{Event: event, AgentID: a.ID, Instance: inst.ID,
-					WritID: writID, Verb: "call", Resource: tool, Decision: decision, Reason: reason})
+					WritID: writID, Verb: verb, Resource: tool, Decision: decision, Reason: reason})
 			}
 			audit("mcp.wrap_start", serverName, "", fmt.Sprintf("cmd=%s writ=%s", args[0], writID))
 
@@ -951,6 +988,18 @@ func mcpCmd() *cobra.Command {
 				ServerIn: serverIn, ServerOut: serverOut,
 				Server: serverName, Decide: decide, Audit: audit,
 			}
+			// URL guard (RFC-013): granting net:… on the writ IS the
+			// opt-in — every url/uri argument is then checked as
+			// net:<host>/<path> per call. --net-guard forces it on
+			// (a writ with no net caps then denies all navigation).
+			if netGuard || e.svc.GrantsVerb(writID, leaf, "net") {
+				p.NetDecide = func(resource string) policy.Decision {
+					if _, _, _, err := e.st.CheckIssuable(inst.ID); err != nil {
+						return policy.Decision{Effect: policy.Deny, Layer: "registry", Reason: err.Error()}
+					}
+					return e.svc.Decide(writID, leaf, "net", resource)
+				}
+			}
 			runErr := p.Run()
 			serverIn.Close()
 			waitErr := server.Wait()
@@ -967,6 +1016,10 @@ func mcpCmd() *cobra.Command {
 	wrap.Flags().StringVar(&serverName, "server-name", "", "resource namespace (default: server binary name)")
 	wrap.Flags().StringSliceVar(&secretMaps, "secret", nil,
 		"inject sealed secret into the SERVER env: ENV_VAR=sealed-name (repeatable)")
+	wrap.Flags().StringSliceVar(&secretFileMaps, "secret-file", nil,
+		"materialize sealed secret as a 0600 file for the SERVER: NAME=sealed-name; path in env NAME and as chancery-file:NAME in server args (repeatable)")
+	wrap.Flags().BoolVar(&netGuard, "net-guard", false,
+		"force the URL guard on (auto-enabled when the writ grants net:… capabilities)")
 	wrap.MarkFlagRequired("agent")
 	wrap.MarkFlagRequired("writ")
 

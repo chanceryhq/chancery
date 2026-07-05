@@ -89,6 +89,22 @@ secrets injected server-side only, revocation on the next call):
     --secret GITHUB_TOKEN=github-token -- npx @yourorg/some-mcp-server
 ```
 
+**Browser agents** ([RFC-013](rfcs/013-browser-sessions-and-tokens.md)):
+the human's session is sealed and custodied — the agent never holds a
+cookie — and granting `net:…` capabilities scopes every navigation
+per-URL, in-path, fail-closed:
+
+```sh
+./chancery secret put github-session --from-file storage-state.json
+./chancery writ grant --for user:you@acme.com --to web-bot \
+    --cap "call:browser/*" --cap "net:github.com/*"
+./chancery mcp wrap --agent web-bot --writ <writ-id> \
+    --secret-file STATE=github-session \
+    -- npx @playwright/mcp@latest --isolated --storage-state=chancery-file:STATE
+# github.com/* navigations pass; mail.google.com is a -32001 denial;
+# instance revoke is the session kill switch. See examples/browser-agent.
+```
+
 Run the control plane as an HTTP API with `./chancery serve`
 (REST/JSON under `/v1`; the admin token is printed once at `init`).
 The audit timeline is hash-chained — `./chancery audit verify` detects
@@ -101,6 +117,7 @@ any edit, deletion, or reorder. Known MVP gaps are published in
 - [**Governing any agent**](docs/governing-any-agent.md) — the non-MCP path: identity, policy, revocation, audit for any job in any language
 - [**Verify every claim yourself**](docs/verify.md) — hands-on, by-hand checks that each RFC (001–009) does what it says
 - [Concepts](docs/concepts.md) — agent, version, instance, writ
+- [**Browser agents**](examples/browser-agent/README.md) — custodied sessions + scoped navigation for Playwright MCP
 - [Claude Code / MCP client setup](examples/claude-code/README.md) — the `.mcp.json` drop-in
 - [Go SDK](sdk/) and [example agent](examples/go-agent/) — advisory in-process checks over the API
 - [LangGraph / Python agents](examples/langgraph/README.md) — the deployment-shaped integration
@@ -114,7 +131,7 @@ a prompt-injected agent cannot talk its way around.
 ```sh
 git clone https://github.com/chanceryhq/chancery && cd chancery
 make build      # -> ./chancery  (Go 1.26+, no CGO, single static binary)
-make test       # go vet + 72 tests across 10 packages, in seconds
+make test       # go vet + 78 tests across 10 packages, in seconds
 make demo       # the 60-second enforcement + audit arc, end to end
 ```
 
@@ -140,3 +157,5 @@ Design happens as a series of locked decisions, one RFC at a time
 | [009](rfcs/009-threat-model.md) | Threat model | In Review |
 | [010](rfcs/010-mvp-scope.md) | MVP scope (the 90-day build) | In Review |
 | [011](rfcs/011-open-core-boundary.md) | Open-core boundary | In Review |
+| [012](rfcs/012-dynamic-agent-creation.md) | Dynamic agent creation (writ-gated runtime spawn) | In Review |
+| [013](rfcs/013-browser-sessions-and-tokens.md) | Browser sessions and tokens as governed credentials | In Review |
