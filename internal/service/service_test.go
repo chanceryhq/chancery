@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -89,6 +90,63 @@ func TestAddVersionSupersedesAndKeepsHistory(t *testing.T) {
 	}
 	if !hasShadowEvent(t, s, "ghost") {
 		t.Error("versioning an unregistered agent must emit agent.unregistered_ref")
+	}
+}
+
+func TestGrantRefusesInactiveAgent(t *testing.T) {
+	// Finding #4: a writ cannot be granted to a revoked agent.
+	s := testService(t)
+	s.RegisterAgent("bot", "user:a@acme.com", "t", "p", "c", "tl", "m")
+	if err := s.St.SetAgentState("bot", store.StateRevoked); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.GrantWrit("user:a@acme.com", "bot", []string{"call:x/*"}, 0, 0); !errors.Is(err, store.ErrInactive) {
+		t.Errorf("granting to a revoked agent must be refused, got %v", err)
+	}
+}
+
+func TestBlockForSubjectPicksTheAgentsBlock(t *testing.T) {
+	// Finding #1: with a delegated writ, the block for the parent must be
+	// the parent's grant block, not the child's (latest) block.
+	s := testService(t)
+	s.RegisterAgent("parent", "user:a@acme.com", "t", "p", "c", "tl", "m")
+	s.RegisterAgent("child", "user:a@acme.com", "t", "p", "c", "tl", "m")
+	wid, root, err := s.GrantWrit("user:a@acme.com", "parent", []string{"call:github/*"}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.DelegateWrit(wid, "", "child", []string{"call:github/get_*"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	parentURI := s.Iss.SubjectURI("parent")
+	childURI := s.Iss.SubjectURI("child")
+
+	pb, err := s.St.BlockForSubject(wid, parentURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pb.ID != root {
+		t.Errorf("parent's block = %s, want the grant block %s", pb.ID, root)
+	}
+	cb, err := s.St.BlockForSubject(wid, childURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cb.ID == root {
+		t.Error("child's block must not be the parent's grant block")
+	}
+	// Evaluated at the parent's block, the full grant applies…
+	if d := s.CheckAction(wid, pb.ID, "call", "github/create_issue"); d.Effect != "allow" {
+		t.Errorf("parent block should allow create_issue, got %+v", d)
+	}
+	// …but at the child's block it's narrowed.
+	if d := s.CheckAction(wid, cb.ID, "call", "github/create_issue"); d.Effect != "deny" {
+		t.Errorf("child block must deny create_issue, got %+v", d)
+	}
+	// An agent that holds no block on the writ is an error, not a silent
+	// fallback to some other agent's authority.
+	if _, err := s.St.BlockForSubject(wid, s.Iss.SubjectURI("stranger")); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("subject with no block must be ErrNotFound, got %v", err)
 	}
 }
 

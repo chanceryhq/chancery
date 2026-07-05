@@ -706,7 +706,34 @@ func mcpCmd() *cobra.Command {
 				return err
 			}
 			if a.State != store.StateActive {
+				// A refused start is still an event worth recording — a
+				// revoked agent trying to open a session is exactly what an
+				// operator wants to see (finding #2).
+				e.st.Audit(store.AuditEvent{Event: "mcp.wrap_refused", AgentID: a.ID, WritID: writID,
+					Reason: fmt.Sprintf("agent %s is %s", a.Name, a.State)})
 				return fmt.Errorf("agent %s is %s: refusing to start (fail closed)", a.Name, a.State)
+			}
+			// Select the block that actually carries THIS agent's authority
+			// (finding #1): the writ's latest block may belong to a
+			// delegated sub-agent. If --block was given, verify it is the
+			// agent's; otherwise find the agent's block on the writ.
+			subject := e.iss.SubjectURI(a.Name)
+			leaf := blockID
+			if leaf == "" {
+				b, err := e.st.BlockForSubject(writID, subject)
+				if err != nil {
+					return fmt.Errorf("%w — grant a writ to %s, or pass --block explicitly", err, a.Name)
+				}
+				leaf = b.ID
+			} else {
+				b, err := e.st.Path(leaf) // validates + loads
+				if err != nil {
+					return err
+				}
+				if b[len(b)-1].ToAgent != subject {
+					return fmt.Errorf("block %s belongs to %s, not --agent %s",
+						leaf, b[len(b)-1].ToAgent, a.Name)
+				}
 			}
 			v, err := e.st.LatestVersion(a.ID)
 			if err != nil {
@@ -717,14 +744,6 @@ func mcpCmd() *cobra.Command {
 			inst, err := e.st.CreateInstance(a.ID, v.ID, "declared", "mcp-wrap")
 			if err != nil {
 				return err
-			}
-			leaf := blockID
-			if leaf == "" {
-				b, err := e.st.LatestBlock(writID)
-				if err != nil {
-					return err
-				}
-				leaf = b.ID
 			}
 			if serverName == "" {
 				serverName = filepath.Base(args[0])
@@ -907,12 +926,26 @@ func secretCmd() *cobra.Command {
 	return cmd
 }
 
-func auditRow(ev store.AuditEvent) []string {
+// agentNameMap builds an agent-id -> name lookup so the audit view can
+// show which agent an event belongs to (finding #3) — lifecycle events
+// like agent.revoke carry an agent id but no writ/verb, so without this
+// they render bare.
+func agentNameMap(e *env) map[string]string {
+	m := map[string]string{}
+	if agents, err := e.st.ListAgents(); err == nil {
+		for _, a := range agents {
+			m[a.ID] = a.Name
+		}
+	}
+	return m
+}
+
+func auditRow(ev store.AuditEvent, names map[string]string) []string {
 	vr := ""
 	if ev.Verb != "" {
 		vr = ev.Verb + ":" + ev.Resource
 	}
-	return []string{ev.At.Format("15:04:05"), ev.Event, ev.Decision, vr, ev.WritID, ev.Reason}
+	return []string{ev.At.Format("15:04:05"), ev.Event, names[ev.AgentID], ev.Decision, vr, ev.WritID, ev.Reason}
 }
 
 // followAudit tails new events as they land (RFC-010 demo: ALLOW events
@@ -923,6 +956,7 @@ func followAudit(e *env, cmd *cobra.Command) error {
 	if latest, err := e.st.AuditTimeline(1); err == nil && len(latest) > 0 {
 		cursor = latest[0].Seq
 	}
+	names := agentNameMap(e)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	ticker := time.NewTicker(400 * time.Millisecond)
@@ -939,9 +973,9 @@ func followAudit(e *env, cmd *cobra.Command) error {
 			}
 			for _, ev := range events {
 				cursor = ev.Seq
-				r := auditRow(ev)
-				fmt.Fprintf(cmd.OutOrStdout(), "%s  %-18s %-6s %-30s %s\n",
-					r[0], r[1], r[2], r[3], r[5])
+				r := auditRow(ev, names)
+				fmt.Fprintf(cmd.OutOrStdout(), "%s  %-16s %-12s %-6s %-28s %s\n",
+					r[0], r[1], r[2], r[3], r[4], r[6])
 			}
 		}
 	}
@@ -972,9 +1006,10 @@ func auditCmd() *cobra.Command {
 				}
 				return nil
 			}
-			rows := [][]string{{"AT", "EVENT", "DECISION", "VERB:RESOURCE", "WRIT", "DETAIL"}}
+			names := agentNameMap(e)
+			rows := [][]string{{"AT", "EVENT", "AGENT", "DECISION", "VERB:RESOURCE", "WRIT", "DETAIL"}}
 			for _, ev := range events {
-				rows = append(rows, auditRow(ev))
+				rows = append(rows, auditRow(ev, names))
 			}
 			table(rows)
 			if follow {

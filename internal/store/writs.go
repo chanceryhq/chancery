@@ -131,6 +131,25 @@ func (s *Store) Path(leafBlockID string) ([]WritBlock, error) {
 	return path, nil
 }
 
+// BlockForSubject returns the deepest (most specific) block of a writ
+// whose subject is the given SPIFFE URI — the block that actually
+// carries that agent's authority. Used so `mcp wrap --agent X` evaluates
+// X's block, not whatever block happens to be latest (which may belong
+// to a delegated sub-agent). Returns ErrNotFound if the agent holds no
+// block on the writ.
+func (s *Store) BlockForSubject(writID, subjectURI string) (*WritBlock, error) {
+	var id string
+	err := s.db.QueryRow(`SELECT id FROM writ_blocks WHERE writ_id = ? AND to_agent = ?
+		ORDER BY depth DESC, created_at DESC LIMIT 1`, writID, subjectURI).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: agent %s holds no block on writ %s", ErrNotFound, subjectURI, writID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.getBlock(id)
+}
+
 // Tree returns all blocks of a writ, root first, for rendering the
 // delegation tree (the audit view of lineage).
 func (s *Store) Tree(writID string) ([]WritBlock, error) {

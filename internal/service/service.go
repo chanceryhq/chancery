@@ -109,6 +109,9 @@ func (s *Service) GrantWrit(forPrincipal, agentName string, capStrs []string, tt
 	if err != nil {
 		return "", "", err
 	}
+	if a.State != store.StateActive {
+		return "", "", fmt.Errorf("%w: cannot grant a writ to %s (%s)", store.ErrInactive, a.Name, a.State)
+	}
 	v, err := s.St.LatestVersion(a.ID)
 	if err != nil {
 		return "", "", err
