@@ -81,6 +81,18 @@ The SDK is **advisory** — a client-side convenience. The enforcement
 boundary is always the out-of-process proxy (`chancery mcp wrap`), which
 a prompt-injected agent cannot talk its way around.
 
+## Build & test from source
+
+```sh
+git clone https://github.com/chanceryhq/chancery && cd chancery
+make build      # -> ./chancery  (Go 1.26+, no CGO, single static binary)
+make test       # go vet + 62 tests across 10 packages, in seconds
+make demo       # the 60-second enforcement + audit arc, end to end
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the repo layout, how the tests
+map to each RFC, and how to propose changes.
+
 ## Design RFCs
 
 Design happens as a series of locked decisions, one RFC at a time
