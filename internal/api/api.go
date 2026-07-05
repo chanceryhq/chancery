@@ -91,6 +91,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/agents/{name}/allowlist", s.authed(s.setAllowlist))
 	mux.HandleFunc("POST /v1/agents/{name}/instances", s.authed(s.startInstance))
 	mux.HandleFunc("POST /v1/instances/{id}/revoke", s.authed(s.revokeInstance))
+	mux.HandleFunc("POST /v1/templates", s.authed(s.createTemplate))
+	mux.HandleFunc("GET /v1/templates", s.authed(s.listTemplates))
+	// Spawn is writ-gated, NOT admin-token-gated (RFC-012 §4): the
+	// caller's authority is its writ block carrying admin:spawn/<tpl>.
+	// An orchestrator never holds the admin token.
+	mux.HandleFunc("POST /v1/spawn", s.spawnAgent)
 	mux.HandleFunc("POST /v1/writs", s.authed(s.grantWrit))
 	mux.HandleFunc("GET /v1/writs", s.authed(s.listWrits))
 	mux.HandleFunc("POST /v1/writs/{id}/delegate", s.authed(s.delegateWrit))
@@ -258,6 +264,83 @@ func (s *Server) revokeInstance(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Svc.St.Audit(store.AuditEvent{Event: "instance.revoke", Instance: id, Reason: "via api"})
 	writeJSON(w, http.StatusOK, map[string]string{"instance": id, "state": "revoked"})
+}
+
+func (s *Server) createTemplate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name          string   `json:"name"`
+		Purpose       string   `json:"purpose"`
+		MaxCaps       []string `json:"max_caps"`
+		MaxTTLSeconds int      `json:"max_ttl_seconds"`
+	}
+	if err := decode(r, &req); err != nil {
+		fail(w, err)
+		return
+	}
+	if req.Name == "" || len(req.MaxCaps) == 0 || req.MaxTTLSeconds <= 0 {
+		writeJSON(w, http.StatusBadRequest, apiError{"name, max_caps, and max_ttl_seconds are required", "invalid"})
+		return
+	}
+	t, err := s.Svc.CreateTemplate(req.Name, req.Purpose, req.MaxCaps,
+		time.Duration(req.MaxTTLSeconds)*time.Second)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"template": t.Name, "max_caps": t.MaxCaps, "max_ttl_seconds": int(t.MaxTTL.Seconds()),
+	})
+}
+
+func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
+	templates, err := s.Svc.St.ListTemplates()
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"templates": templates, "next": nil})
+}
+
+func (s *Server) spawnAgent(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Writ         string   `json:"writ"`
+		Block        string   `json:"block"`
+		Agent        string   `json:"agent"` // the spawning parent
+		Template     string   `json:"template"`
+		Name         string   `json:"name"` // the child's name
+		Caps         []string `json:"caps"`
+		TTLSeconds   int      `json:"ttl_seconds"`
+		PromptSHA256 string   `json:"prompt_sha256"`
+		ConfigSHA256 string   `json:"config_sha256"`
+		ToolsSHA256  string   `json:"tools_sha256"`
+		Model        string   `json:"model"`
+	}
+	if err := decode(r, &req); err != nil {
+		fail(w, err)
+		return
+	}
+	if req.Writ == "" || req.Agent == "" || req.Template == "" || req.Name == "" {
+		writeJSON(w, http.StatusBadRequest, apiError{"writ, agent, template, and name are required", "invalid"})
+		return
+	}
+	child, blockID, err := s.Svc.SpawnAgent(req.Writ, req.Block, req.Agent,
+		req.Template, req.Name, req.Caps, time.Duration(req.TTLSeconds)*time.Second,
+		req.PromptSHA256, req.ConfigSHA256, req.ToolsSHA256, req.Model)
+	if err != nil {
+		// A refused spawn is an authorization outcome, not a transport
+		// error — but unlike a check, the caller was asking to mutate.
+		if strings.HasPrefix(err.Error(), "spawn refused: ") {
+			writeJSON(w, http.StatusForbidden, apiError{err.Error(), "spawn_refused"})
+			return
+		}
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"agent": child.Name, "subject": s.Svc.Iss.SubjectURI(child.Name),
+		"owner": child.Owner, "template": child.Template, "spawned_by": child.SpawnedBy,
+		"expires_at": child.ExpiresAt, "block": blockID, "writ": req.Writ,
+	})
 }
 
 func (s *Server) grantWrit(w http.ResponseWriter, r *http.Request) {

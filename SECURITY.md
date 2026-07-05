@@ -29,6 +29,7 @@ security is never paywalled ([RFC-011](rfcs/011-open-core-boundary.md)).
 | G7 | No memory locking/zeroization in the broker | Secrets in swappable memory during injection | hardening backlog |
 | G8 | No key-rotation automation | Slow recovery from issuer-key compromise | v1 |
 | G9 | Declared (unverified) runtime attestation | An instance can lie about where it runs | v1 (verifiers) |
+| G10 | Writ-gated spawn (`/v1/spawn`) is capability-URL style, no proof-of-possession | Knowing a writ id + parent agent name acts as bearer, bounded by that writ's own spawn capability and template ceiling | v1 (PoP via the writ's reserved `dk` field, [RFC-012](rfcs/012-dynamic-agent-creation.md)) |
 
 ## Deployment guidance
 

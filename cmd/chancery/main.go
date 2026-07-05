@@ -104,7 +104,7 @@ func main() {
 	}
 	root.PersistentFlags().StringVar(&dataDir, "data-dir", defaultDataDir(), "state directory")
 
-	root.AddCommand(initCmd(), agentCmd(), instanceCmd(), tokenCmd(), writCmd(), auditCmd(), secretCmd(), mcpCmd(), serveCmd())
+	root.AddCommand(initCmd(), agentCmd(), templateCmd(), instanceCmd(), tokenCmd(), writCmd(), auditCmd(), secretCmd(), mcpCmd(), serveCmd())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -231,9 +231,23 @@ func agentCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rows := [][]string{{"NAME", "STATE", "OWNER", "PURPOSE"}}
+			rows := [][]string{{"NAME", "STATE", "OWNER", "SPAWNED BY", "EXPIRES", "PURPOSE"}}
 			for _, a := range agents {
-				rows = append(rows, []string{a.Name, a.State, a.Owner, a.Purpose})
+				state, spawnedBy, expires := a.State, a.SpawnedBy, ""
+				if spawnedBy == "" {
+					spawnedBy = "-"
+				}
+				if a.ExpiresAt != nil {
+					expires = a.ExpiresAt.UTC().Format(time.RFC3339)
+					// An expired ephemeral is already denied in-path
+					// even before `agent sweep` retires it.
+					if a.State == store.StateActive && time.Now().UTC().After(*a.ExpiresAt) {
+						state = "expired"
+					}
+				} else {
+					expires = "-"
+				}
+				rows = append(rows, []string{a.Name, state, a.Owner, spawnedBy, expires, a.Purpose})
 			}
 			table(rows)
 			return nil
@@ -378,12 +392,135 @@ func agentCmd() *cobra.Command {
 	transfer.Flags().StringVar(&newOwner, "owner", "", "new accountable owner principal (required)")
 	transfer.MarkFlagRequired("owner")
 
-	cmd.AddCommand(register, version, list, describe, allow, transfer,
+	var spWrit, spBlock, spParent, spTemplate, spPrompt, spConfig, spTools, spModel string
+	var spCaps []string
+	var spTTL time.Duration
+	spawn := &cobra.Command{
+		Use:   "spawn <name>",
+		Short: "Spawn an ephemeral agent at runtime, writ-gated by admin:spawn/<template> (RFC-012)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			child, blockID, err := e.svc.SpawnAgent(spWrit, spBlock, spParent, spTemplate,
+				args[0], spCaps, spTTL, hashArg(spPrompt), hashArg(spConfig), hashArg(spTools), spModel)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("spawned %s\n  owner     %s (inherited from %s)\n  template  %s\n  expires   %s\n  block     %s (writ %s)\n",
+				e.iss.SubjectURI(child.Name), child.Owner, child.SpawnedBy, child.Template,
+				child.ExpiresAt.Format(time.RFC3339), blockID, spWrit)
+			return nil
+		},
+	}
+	spawn.Flags().StringVar(&spWrit, "writ", "", "the spawning agent's writ id (required)")
+	spawn.Flags().StringVar(&spBlock, "block", "", "the spawning agent's block (default: its own block on the writ)")
+	spawn.Flags().StringVar(&spParent, "agent", "", "the spawning (parent) agent name (required)")
+	spawn.Flags().StringVar(&spTemplate, "template", "", "pre-approved template to spawn from (required)")
+	spawn.Flags().StringSliceVar(&spCaps, "cap", nil, "capability for the child (repeatable; default: full template ceiling)")
+	spawn.Flags().DurationVar(&spTTL, "ttl", 0, "child lifetime (default: template max; may not exceed it)")
+	spawn.Flags().StringVar(&spPrompt, "prompt", "", "child system prompt: file path or literal (hashed, never stored)")
+	spawn.Flags().StringVar(&spConfig, "config", "", "child configuration: file path or literal (hashed, never stored)")
+	spawn.Flags().StringVar(&spTools, "tools", "", "child tool manifest: file path or literal (hashed, never stored)")
+	spawn.Flags().StringVar(&spModel, "model", "", "child model identifier")
+	spawn.MarkFlagRequired("writ")
+	spawn.MarkFlagRequired("agent")
+	spawn.MarkFlagRequired("template")
+
+	sweep := &cobra.Command{
+		Use:   "sweep",
+		Short: "Retire expired ephemeral agents (expiry already denies in-path; this is registry hygiene)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			names, err := e.st.SweepExpired()
+			if err != nil {
+				return err
+			}
+			for _, n := range names {
+				if a, err := e.st.GetAgentByName(n); err == nil {
+					e.st.Audit(store.AuditEvent{Event: "agent.expired", AgentID: a.ID,
+						Reason: "ephemeral ttl elapsed; retired by sweep"})
+				}
+				fmt.Printf("retired %s (expired)\n", n)
+			}
+			if len(names) == 0 {
+				fmt.Println("nothing to sweep")
+			}
+			return nil
+		},
+	}
+
+	cmd.AddCommand(register, version, list, describe, allow, transfer, spawn, sweep,
 		state("suspend", "Suspend an agent (reversible)", store.StateSuspended),
 		state("resume", "Reactivate a suspended agent", store.StateActive),
 		state("retire", "Retire an agent — terminal, administrative end-of-life", store.StateRetired),
 		state("orphan", "Mark an agent ownerless — blocks issuance until transfer", store.StateOrphaned),
 		state("revoke", "Revoke an agent identity — terminal; kills all versions and instances", store.StateRevoked))
+	return cmd
+}
+
+func templateCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "template", Short: "Pre-approved shapes for runtime-spawned agents (RFC-012)"}
+
+	var purpose string
+	var maxCaps []string
+	var maxTTL time.Duration
+	create := &cobra.Command{
+		Use:   "create <name>",
+		Short: "Lock a spawn ceiling: max capabilities and max lifetime for agents spawned from it",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			t, err := e.svc.CreateTemplate(args[0], purpose, maxCaps, maxTTL)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("template %s\n  max caps  %s\n  max ttl   %s\n  spawn cap %s\n",
+				t.Name, strings.Join(t.MaxCaps, ", "), t.MaxTTL, "admin:spawn/"+t.Name)
+			return nil
+		},
+	}
+	create.Flags().StringVar(&purpose, "purpose", "", "purpose stamped on every agent spawned from this template")
+	create.Flags().StringSliceVar(&maxCaps, "max-cap", nil, "capability ceiling (repeatable, required)")
+	create.Flags().DurationVar(&maxTTL, "max-ttl", 0, "maximum lifetime of a spawned agent (required)")
+	create.MarkFlagRequired("max-cap")
+	create.MarkFlagRequired("max-ttl")
+
+	list := &cobra.Command{
+		Use:   "list",
+		Short: "List spawn templates",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			templates, err := e.st.ListTemplates()
+			if err != nil {
+				return err
+			}
+			rows := [][]string{{"NAME", "MAX TTL", "MAX CAPS", "PURPOSE"}}
+			for _, t := range templates {
+				rows = append(rows, []string{t.Name, t.MaxTTL.String(),
+					strings.Join(t.MaxCaps, ","), t.Purpose})
+			}
+			table(rows)
+			return nil
+		},
+	}
+
+	cmd.AddCommand(create, list)
 	return cmd
 }
 

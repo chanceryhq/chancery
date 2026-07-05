@@ -112,6 +112,9 @@ decision = writ.Check(action)            L1: delegated authority (RFC-002)
 - Verbs: lowercase token from a small registry — `call` (tool/API
   invocation, MVP), `read`, `write`, `exec`, `net` (reserved for HTTP/
   shell/browser runtimes, RFC-005). `*` matches any verb.
+  *Amended 2026-07-05 by RFC-012:* `admin` joins the registry for
+  writ-governed control-plane self-service (`admin:spawn/<template>`);
+  the grammar is otherwise unchanged.
 - Resources: `/`-separated segments, lowercase `[a-z0-9_.-]+`;
   hierarchical, e.g. `github/repos/acme/create_issue`.
 - Patterns: a literal resource, or a prefix ending in `*` where `*` is

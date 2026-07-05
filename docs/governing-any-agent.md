@@ -25,7 +25,8 @@ runtimes land, with no change to your writs or policies.
 
 This governs a plain job — a database ETL agent — with no MCP involved.
 The actions are modeled as `verb:resource`; the verbs are `call`, `read`,
-`write`, `exec`, `net` (RFC-004).
+`write`, `exec`, `net`, plus `admin` for writ-governed control-plane
+self-service (RFC-004, RFC-012).
 
 ### 1. Set up the control plane
 
@@ -102,6 +103,35 @@ chancery secret put analytics-db-pass --from-file ./db_pass
 # once the HTTP-egress PEP lands — Chancery injects it in-path and the
 # agent never sees it at all (the model already used for MCP servers).
 ```
+
+---
+
+## Orchestrators that create agents at runtime
+
+If your system (Hermes/Ruflo/Vantage-style) spins up workers on the
+fly, don't give the orchestrator the admin token — spawning is itself
+writ-governed (RFC-012). Once, with operator authority:
+
+```sh
+chancery template create researcher --purpose "reads github" \
+  --max-cap "call:github/get_*" --max-ttl 30m
+chancery writ grant --for user:you@acme.com --to orchestrator \
+  --cap "call:github/*" --cap "admin:spawn/researcher"
+```
+
+Then the orchestrator spawns tokenlessly, from any language:
+
+```python
+r = requests.post(f"{CHANCERY}/v1/spawn", json={
+    "writ": WRIT_ID, "agent": "orchestrator",
+    "template": "researcher", "name": "worker-1",
+    "caps": ["call:github/get_*"], "ttl_seconds": 600,
+})  # 201: registered + delegated a narrowed block; 403: spawn refused
+```
+
+The child inherits the owner, can never exceed the template ceiling or
+the orchestrator's own authority, expires on its own, and shows up in
+the audit trail as `agent.spawn` with full lineage.
 
 ---
 

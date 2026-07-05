@@ -70,6 +70,16 @@ GET  /v1/audit?limit= · GET /v1/audit/verify
 GET  /healthz                          (unauthenticated liveness only)
 ```
 
+*Amended 2026-07-05 by RFC-012 (dynamic agent creation):*
+```
+POST /v1/templates · GET /v1/templates  spawn ceilings (admin-token-gated)
+POST /v1/spawn                          writ-gated, NO admin token: the
+                                        caller's writ block carrying
+                                        admin:spawn/<template> is the authorization
+```
+The `agents` table gains `spawned_by`, `template`, `expires_at`
+(additive migration) and an `agent_templates` table joins the schema.
+
 - **Decisions are POSTs, state changes are POSTs** — no PATCH semantics
   arguments, no PUT idempotency traps on security verbs.
 - **Content never crosses the API:** registration accepts *digests*

@@ -1,6 +1,6 @@
 # Concepts
 
-Four objects carry the whole model. If you understand these, you
+Five objects carry the whole model. If you understand these, you
 understand Chancery.
 
 ## Agent → Version → Instance
@@ -39,7 +39,31 @@ on the next action.
 
 Capabilities are `verb:resource` patterns — `call:github/get_*`,
 `call:fs/read_*`. The verb registry and pattern grammar are locked in
-RFC-004.
+RFC-004 (extended with the `admin` verb by RFC-012).
+
+## Template (and spawned agents)
+
+Many orchestrators create their workers **at runtime** — prompts
+written on the fly, lifetimes of minutes. A **template** (RFC-012) is
+the human-approved ceiling for that: a purpose, a set of max
+capabilities, and a max lifetime, locked once by an operator.
+
+An orchestrator whose writ carries `admin:spawn/<template>` can then
+**spawn**: one atomic, writ-gated operation that registers an
+ephemeral child agent and delegates it a narrowed block of the
+orchestrator's own writ. No admin token is involved. The child:
+
+- inherits the **owner** from its parent (accountability can't be
+  laundered),
+- carries `spawned_by`, `template`, and a hard `expires_at`,
+- can never exceed the template ceiling, its parent's authority, or
+  the template's max TTL,
+- is denied in-path the moment it expires (`chancery agent sweep`
+  later retires it for registry hygiene),
+- cannot itself spawn unless deliberately delegated a spawn capability.
+
+The spawn tree is the writ tree: attribution and revocation follow the
+same chain.
 
 ## How they compose at enforcement time
 

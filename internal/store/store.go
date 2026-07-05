@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -38,6 +39,39 @@ type Agent struct {
 	Owner     string
 	Purpose   string
 	State     string
+	CreatedAt time.Time
+	// Ephemeral spawn provenance (RFC-012): set only for agents created
+	// at runtime by an orchestrator through the writ-gated spawn path.
+	SpawnedBy string     // parent agent name, "" for durable agents
+	Template  string     // template the spawn was constrained by
+	ExpiresAt *time.Time // hard end-of-life; expired = denied in-path
+}
+
+// ActiveErr is THE liveness check for an agent as a principal: state
+// must be active AND, for ephemeral spawned agents, the expiry must not
+// have passed (RFC-012 §4: an expired ephemeral is denied in-path even
+// before the sweep retires it — lazy expiry, fail closed).
+func (a *Agent) ActiveErr() error {
+	if a.State != StateActive {
+		return fmt.Errorf("%w: agent %s is %s", ErrInactive, a.Name, a.State)
+	}
+	if a.ExpiresAt != nil && time.Now().UTC().After(*a.ExpiresAt) {
+		return fmt.Errorf("%w: ephemeral agent %s expired %s", ErrInactive,
+			a.Name, a.ExpiresAt.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+// Template is a pre-approved shape for runtime-spawned agents
+// (RFC-012 §4): a human locks the ceiling once; every spawn must fit
+// inside it. MaxCaps bound what a spawned agent may be delegated;
+// MaxTTL bounds how long it may live.
+type Template struct {
+	ID        string
+	Name      string
+	Purpose   string
+	MaxCaps   []string
+	MaxTTL    time.Duration
 	CreatedAt time.Time
 }
 
@@ -80,6 +114,16 @@ CREATE TABLE IF NOT EXISTS agents (
 	id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
 	owner TEXT NOT NULL, purpose TEXT NOT NULL,
 	state TEXT NOT NULL DEFAULT 'active',
+	created_at TIMESTAMP NOT NULL,
+	spawned_by TEXT NOT NULL DEFAULT '',
+	template TEXT NOT NULL DEFAULT '',
+	expires_at TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS agent_templates (
+	id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+	purpose TEXT NOT NULL,
+	max_caps TEXT NOT NULL,
+	max_ttl_secs INTEGER NOT NULL,
 	created_at TIMESTAMP NOT NULL
 );
 CREATE TABLE IF NOT EXISTS agent_versions (
@@ -138,6 +182,18 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// Additive migrations for databases created before RFC-012. SQLite
+	// has no ADD COLUMN IF NOT EXISTS; a duplicate-column error means
+	// the migration already ran.
+	for _, ddl := range []string{
+		`ALTER TABLE agents ADD COLUMN spawned_by TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE agents ADD COLUMN expires_at TIMESTAMP`,
+	} {
+		if _, err := db.Exec(ddl); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return nil, fmt.Errorf("migrate: %w", err)
+		}
+	}
 	return &Store{db: db}, nil
 }
 
@@ -175,11 +231,35 @@ func (s *Store) CreateAgent(name, owner, purpose string) (*Agent, error) {
 	return a, nil
 }
 
-func (s *Store) GetAgentByName(name string) (*Agent, error) {
+// CreateSpawnedAgent creates an ephemeral runtime-spawned agent
+// (RFC-012): provenance (spawning parent, template) and a hard expiry
+// are part of the identity record, not an afterthought.
+func (s *Store) CreateSpawnedAgent(name, owner, purpose, spawnedBy, template string, expiresAt time.Time) (*Agent, error) {
+	exp := expiresAt.UTC()
+	a := &Agent{ID: newID(), Name: name, Owner: owner, Purpose: purpose,
+		State: StateActive, CreatedAt: time.Now().UTC(),
+		SpawnedBy: spawnedBy, Template: template, ExpiresAt: &exp}
+	_, err := s.db.Exec(`INSERT INTO agents (id, name, owner, purpose, state, created_at,
+		spawned_by, template, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.Name, a.Owner, a.Purpose, a.State, a.CreatedAt, a.SpawnedBy, a.Template, exp)
+	if err != nil {
+		return nil, fmt.Errorf("%w: agent %q", ErrConflict, name)
+	}
+	return a, nil
+}
+
+const agentCols = `id, name, owner, purpose, state, created_at,
+	spawned_by, template, expires_at`
+
+func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	a := &Agent{}
-	err := s.db.QueryRow(`SELECT id, name, owner, purpose, state, created_at
-		FROM agents WHERE name = ?`, name).
-		Scan(&a.ID, &a.Name, &a.Owner, &a.Purpose, &a.State, &a.CreatedAt)
+	err := row.Scan(&a.ID, &a.Name, &a.Owner, &a.Purpose, &a.State, &a.CreatedAt,
+		&a.SpawnedBy, &a.Template, &a.ExpiresAt)
+	return a, err
+}
+
+func (s *Store) GetAgentByName(name string) (*Agent, error) {
+	a, err := scanAgent(s.db.QueryRow(`SELECT `+agentCols+` FROM agents WHERE name = ?`, name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: agent %q", ErrNotFound, name)
 	}
@@ -187,19 +267,125 @@ func (s *Store) GetAgentByName(name string) (*Agent, error) {
 }
 
 func (s *Store) ListAgents() ([]Agent, error) {
-	rows, err := s.db.Query(`SELECT id, name, owner, purpose, state, created_at
-		FROM agents ORDER BY name`)
+	rows, err := s.db.Query(`SELECT ` + agentCols + ` FROM agents ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Agent
 	for rows.Next() {
-		var a Agent
-		if err := rows.Scan(&a.ID, &a.Name, &a.Owner, &a.Purpose, &a.State, &a.CreatedAt); err != nil {
+		a, err := scanAgent(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, a)
+		out = append(out, *a)
+	}
+	return out, rows.Err()
+}
+
+// SetAgentExpiry adjusts an ephemeral agent's hard end-of-life. Only
+// meaningful for spawned agents; refuses agents without an expiry so a
+// durable identity cannot silently become ephemeral (or vice versa).
+func (s *Store) SetAgentExpiry(name string, at time.Time) error {
+	res, err := s.db.Exec(`UPDATE agents SET expires_at = ?
+		WHERE name = ? AND expires_at IS NOT NULL`, at.UTC(), name)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: ephemeral agent %q", ErrNotFound, name)
+	}
+	return nil
+}
+
+// SweepExpired retires every active ephemeral agent whose expiry has
+// passed and returns their names. Expiry already denies in-path
+// (ActiveErr); the sweep is registry hygiene, making end-of-life
+// visible in `agent list` and the audit trail.
+func (s *Store) SweepExpired() ([]string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	rows, err := tx.Query(`SELECT name FROM agents
+		WHERE state = ? AND expires_at IS NOT NULL AND expires_at < ?`, StateActive, now)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		names = append(names, n)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`UPDATE agents SET state = ?
+		WHERE state = ? AND expires_at IS NOT NULL AND expires_at < ?`,
+		StateRetired, StateActive, now); err != nil {
+		return nil, err
+	}
+	return names, tx.Commit()
+}
+
+// --- agent templates (RFC-012) ---
+
+func (s *Store) CreateTemplate(name, purpose string, maxCaps []string, maxTTL time.Duration) (*Template, error) {
+	t := &Template{ID: newID(), Name: name, Purpose: purpose, MaxCaps: maxCaps,
+		MaxTTL: maxTTL, CreatedAt: time.Now().UTC()}
+	_, err := s.db.Exec(`INSERT INTO agent_templates (id, name, purpose, max_caps, max_ttl_secs, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Name, t.Purpose, strings.Join(maxCaps, "\x1f"), int64(maxTTL.Seconds()), t.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("%w: template %q", ErrConflict, name)
+	}
+	return t, nil
+}
+
+func scanTemplate(row interface{ Scan(...any) error }) (*Template, error) {
+	t := &Template{}
+	var caps string
+	var ttlSecs int64
+	if err := row.Scan(&t.ID, &t.Name, &t.Purpose, &caps, &ttlSecs, &t.CreatedAt); err != nil {
+		return nil, err
+	}
+	if caps != "" {
+		t.MaxCaps = strings.Split(caps, "\x1f")
+	}
+	t.MaxTTL = time.Duration(ttlSecs) * time.Second
+	return t, nil
+}
+
+func (s *Store) GetTemplate(name string) (*Template, error) {
+	t, err := scanTemplate(s.db.QueryRow(`SELECT id, name, purpose, max_caps, max_ttl_secs, created_at
+		FROM agent_templates WHERE name = ?`, name))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: template %q", ErrNotFound, name)
+	}
+	return t, err
+}
+
+func (s *Store) ListTemplates() ([]Template, error) {
+	rows, err := s.db.Query(`SELECT id, name, purpose, max_caps, max_ttl_secs, created_at
+		FROM agent_templates ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Template
+	for rows.Next() {
+		t, err := scanTemplate(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *t)
 	}
 	return out, rows.Err()
 }
@@ -439,14 +625,12 @@ func (s *Store) CheckIssuable(instanceID string) (*Agent, *Version, *Instance, e
 	if in.State != StateActive {
 		return nil, nil, nil, fmt.Errorf("%w: instance %s is %s", ErrInactive, in.ID, in.State)
 	}
-	a := &Agent{}
-	if err := s.db.QueryRow(`SELECT id, name, owner, purpose, state, created_at
-		FROM agents WHERE id = ?`, in.AgentID).
-		Scan(&a.ID, &a.Name, &a.Owner, &a.Purpose, &a.State, &a.CreatedAt); err != nil {
+	a, err := scanAgent(s.db.QueryRow(`SELECT `+agentCols+` FROM agents WHERE id = ?`, in.AgentID))
+	if err != nil {
 		return nil, nil, nil, err
 	}
-	if a.State != StateActive {
-		return nil, nil, nil, fmt.Errorf("%w: agent %s is %s", ErrInactive, a.Name, a.State)
+	if err := a.ActiveErr(); err != nil {
+		return nil, nil, nil, err
 	}
 	v := &Version{}
 	if err := s.db.QueryRow(`SELECT id, agent_id, seq, prompt_sha256, config_sha256,

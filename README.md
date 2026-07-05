@@ -63,6 +63,23 @@ Every action is attributed to a specific agent, version, and delegation
 chain — and a delegated writ can only ever narrow: the block format has
 no field for widening.
 
+Orchestrators that **create agents at runtime** don't need the admin
+token: spawning is itself writ-governed
+([RFC-012](rfcs/012-dynamic-agent-creation.md)). A human locks a
+template (capability ceiling + max lifetime) once; the orchestrator's
+writ carries `admin:spawn/<template>`; every spawned worker is
+registered, delegated a narrowed block, owner-attributed, and expires
+on its own:
+
+```sh
+./chancery template create researcher --purpose "reads github" \
+    --max-cap "call:github/get_*" --max-ttl 30m
+./chancery writ grant --for user:you@acme.com --to orchestrator \
+    --cap "call:github/*" --cap "admin:spawn/researcher"
+./chancery agent spawn worker-1 --writ <writ-id> --agent orchestrator \
+    --template researcher --ttl 10m      # or POST /v1/spawn — no admin token
+```
+
 Enforce it live on any stdio MCP server (per-call policy, sealed
 secrets injected server-side only, revocation on the next call):
 
@@ -97,7 +114,7 @@ a prompt-injected agent cannot talk its way around.
 ```sh
 git clone https://github.com/chanceryhq/chancery && cd chancery
 make build      # -> ./chancery  (Go 1.26+, no CGO, single static binary)
-make test       # go vet + 62 tests across 10 packages, in seconds
+make test       # go vet + 72 tests across 10 packages, in seconds
 make demo       # the 60-second enforcement + audit arc, end to end
 ```
 

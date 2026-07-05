@@ -199,6 +199,46 @@ The full threat model and the honest list of known MVP gaps are in
 
 ---
 
+## RFC-012 — Runtime spawn is writ-gated and ceiling-bounded
+
+The claim: an orchestrator can create agents at runtime **without the
+admin token**, and can never spawn beyond the template a human
+approved.
+
+```sh
+chancery agent register orch --owner user:you@acme.com --purpose "orchestrates"
+chancery template create researcher --purpose "reads github" \
+    --max-cap "call:github/get_*" --max-ttl 30m
+
+# A writ that carries work caps AND the spawn capability:
+W=$(chancery writ grant --for user:you@acme.com --to orch \
+    --cap "call:github/*" --cap "admin:spawn/researcher" --ttl 1h | grep -o 'w_[A-Z0-9]*' | head -1)
+
+# 1) Spawn works — child registered, delegated, owner inherited, expiry set:
+chancery agent spawn worker-1 --writ $W --agent orch --template researcher --ttl 10m
+
+# 2) The ceiling binds — wider than the template is refused:
+chancery agent spawn worker-2 --writ $W --agent orch --template researcher \
+    --cap "call:github/*"
+# expect: spawn refused: capability call:github/* exceeds template researcher ceiling
+
+# 3) The writ gates — a template the writ doesn't name is refused:
+chancery template create deployer --purpose d --max-cap "call:deploy/*" --max-ttl 10m
+chancery agent spawn worker-3 --writ $W --agent orch --template deployer
+# expect: spawn refused: [writ] outside effective authority (grant ∩ caveats)
+
+# 4) Expiry is real — expired ephemerals are denied in-path and swept:
+chancery audit --limit 8    # agent.spawn, agent.spawn_refused ×2, all attributed
+chancery agent sweep        # retires any expired ephemerals (audits agent.expired)
+```
+
+**Expect:** the spawn, both refusals, and their audit events — and note
+no admin token appeared anywhere after the template was created. Over
+HTTP the same operation is `POST /v1/spawn` with **no bearer token**:
+the writ is the authorization.
+
+---
+
 ```sh
 rm -rf "$CHANCERY_DATA"     # clean up the throwaway state
 ```

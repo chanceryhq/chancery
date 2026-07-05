@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chanceryhq/chancery/internal/identity"
 	"github.com/chanceryhq/chancery/internal/store"
@@ -185,4 +186,131 @@ func TestServiceEndToEnd(t *testing.T) {
 	if d := s.CheckAction(wid, "", "call", "github/create_issue"); d.Effect != "deny" {
 		t.Errorf("attenuation failed: %+v", d)
 	}
+}
+
+// spawnFixture: an orchestrator holding a writ with work caps AND the
+// admin:spawn/researcher capability, plus the researcher template.
+func spawnFixture(t *testing.T) (*Service, string) {
+	t.Helper()
+	s := testService(t)
+	if _, _, err := s.RegisterAgent("orchestrator", "user:a@acme.com", "t", "p", "c", "tl", "m"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateTemplate("researcher", "reads github",
+		[]string{"call:github/get_*", "call:github/search_*"}, 30*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	wid, _, err := s.GrantWrit("user:a@acme.com", "orchestrator",
+		[]string{"call:github/*", "admin:spawn/researcher"}, time.Hour, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, wid
+}
+
+func TestSpawnWithinTemplate(t *testing.T) {
+	// RFC-012 §4: writ-gated spawn registers an ephemeral child, owner
+	// inherited, and delegates a narrowed block in one operation.
+	s, wid := spawnFixture(t)
+	child, blockID, err := s.SpawnAgent(wid, "", "orchestrator", "researcher", "worker-1",
+		[]string{"call:github/get_*"}, 10*time.Minute, "p", "c", "tl", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Owner != "user:a@acme.com" || child.SpawnedBy != "orchestrator" || child.Template != "researcher" {
+		t.Errorf("provenance wrong: %+v", child)
+	}
+	if child.ExpiresAt == nil {
+		t.Fatal("spawned agent must carry an expiry")
+	}
+	if d := s.CheckAction(wid, blockID, "call", "github/get_repo"); d.Effect != "allow" {
+		t.Errorf("child should act within its caps: %+v", d)
+	}
+	if d := s.CheckAction(wid, blockID, "call", "github/create_issue"); d.Effect != "deny" {
+		t.Errorf("child must be narrowed: %+v", d)
+	}
+	// The child holds no spawn capability: spawned agents cannot spawn
+	// unless explicitly delegated admin:spawn/* — and here they are not.
+	if _, _, err := s.SpawnAgent(wid, "", "worker-1", "researcher", "worker-2",
+		nil, 0, "p", "c", "tl", "m"); err == nil {
+		t.Error("a child without admin:spawn must not be able to spawn")
+	}
+}
+
+func TestSpawnRefusedWithoutAdminCap(t *testing.T) {
+	s := testService(t)
+	s.RegisterAgent("plain", "user:a@acme.com", "t", "p", "c", "tl", "m")
+	s.CreateTemplate("researcher", "r", []string{"call:github/get_*"}, time.Hour)
+	wid, _, err := s.GrantWrit("user:a@acme.com", "plain", []string{"call:github/*"}, time.Hour, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.SpawnAgent(wid, "", "plain", "researcher", "w",
+		nil, 0, "p", "c", "tl", "m"); err == nil || !strings.Contains(err.Error(), "spawn refused") {
+		t.Errorf("spawn without admin:spawn/<template> must be refused, got %v", err)
+	}
+	events, _ := s.St.AuditTimeline(10)
+	found := false
+	for _, e := range events {
+		if e.Event == "agent.spawn_refused" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a refused spawn must be audited as agent.spawn_refused")
+	}
+}
+
+func TestSpawnCapExceedingTemplateRefused(t *testing.T) {
+	s, wid := spawnFixture(t)
+	if _, _, err := s.SpawnAgent(wid, "", "orchestrator", "researcher", "w",
+		[]string{"call:github/*"}, 0, "p", "c", "tl", "m"); err == nil ||
+		!strings.Contains(err.Error(), "exceeds template") {
+		t.Errorf("cap wider than the template ceiling must be refused, got %v", err)
+	}
+}
+
+func TestSpawnTTLExceedingTemplateRefused(t *testing.T) {
+	s, wid := spawnFixture(t)
+	if _, _, err := s.SpawnAgent(wid, "", "orchestrator", "researcher", "w",
+		nil, 2*time.Hour, "p", "c", "tl", "m"); err == nil ||
+		!strings.Contains(err.Error(), "exceeds template max") {
+		t.Errorf("ttl above the template max must be refused, got %v", err)
+	}
+}
+
+func TestExpiredEphemeralIsDeniedAndSwept(t *testing.T) {
+	// RFC-012 §4: expiry denies in-path lazily; the sweep retires.
+	s, wid := spawnFixture(t)
+	child, blockID, err := s.SpawnAgent(wid, "", "orchestrator", "researcher", "shortlived",
+		nil, 0, "p", "c", "tl", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Force the expiry into the past in the registry.
+	if err := s.St.SetAgentExpiry("shortlived", time.Now().UTC().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if d := s.CheckAction(wid, blockID, "call", "github/get_repo"); d.Effect != "deny" ||
+		!strings.Contains(d.Reason, "expired") {
+		t.Errorf("expired ephemeral must be denied in-path, got %+v", d)
+	}
+	if _, _, err := s.GrantWrit("user:a@acme.com", "shortlived", []string{"call:x/y"}, time.Hour, 0); err == nil {
+		t.Error("granting to an expired ephemeral must be refused")
+	}
+	names, err := s.St.SweepExpired()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 1 || names[0] != "shortlived" {
+		t.Errorf("sweep = %v, want [shortlived]", names)
+	}
+	a, err := s.St.GetAgentByName("shortlived")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.State != store.StateRetired {
+		t.Errorf("swept agent state = %s, want retired", a.State)
+	}
+	_ = child
 }

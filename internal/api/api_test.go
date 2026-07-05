@@ -234,3 +234,60 @@ func TestDelegationOverHTTP(t *testing.T) {
 		t.Errorf("null-authority delegation: %d %v", code, body)
 	}
 }
+
+// RFC-012 over HTTP: POST /v1/spawn is writ-gated, not admin-token-
+// gated. An orchestrator holding admin:spawn/<template> can spawn with
+// NO bearer token; without the capability it is 403, never 401.
+func TestSpawnOverHTTPWritGated(t *testing.T) {
+	ts := testServer(t)
+	call(t, ts, "POST", "/v1/agents", testToken, map[string]any{
+		"name": "orch", "owner": "user:a@acme.com", "purpose": "orchestrates"})
+	code, _ := call(t, ts, "POST", "/v1/templates", testToken, map[string]any{
+		"name": "researcher", "purpose": "reads github",
+		"max_caps": []string{"call:github/get_*"}, "max_ttl_seconds": 1800})
+	if code != http.StatusCreated {
+		t.Fatalf("template create = %d", code)
+	}
+	code, body := call(t, ts, "POST", "/v1/writs", testToken, map[string]any{
+		"for": "user:a@acme.com", "to": "orch",
+		"caps": []string{"call:github/*", "admin:spawn/researcher"}, "ttl_seconds": 3600})
+	if code != http.StatusCreated {
+		t.Fatalf("grant = %d", code)
+	}
+	var wid string
+	json.Unmarshal(body["writ"], &wid)
+
+	// No bearer token: the writ IS the authorization.
+	code, body = call(t, ts, "POST", "/v1/spawn", "", map[string]any{
+		"writ": wid, "agent": "orch", "template": "researcher", "name": "worker-1",
+		"caps": []string{"call:github/get_*"}, "ttl_seconds": 600})
+	if code != http.StatusCreated {
+		t.Fatalf("spawn = %d, body %v", code, body)
+	}
+	var owner string
+	json.Unmarshal(body["owner"], &owner)
+	if owner != "user:a@acme.com" {
+		t.Errorf("spawned owner = %q, want inherited user:a@acme.com", owner)
+	}
+	var block string
+	json.Unmarshal(body["block"], &block)
+
+	// The spawned block is enforceable immediately — and narrowed.
+	code, body = call(t, ts, "POST", "/v1/writs/"+wid+"/check", testToken,
+		map[string]any{"verb": "call", "resource": "github/create_issue", "block": block})
+	var decision string
+	json.Unmarshal(body["decision"], &decision)
+	if code != http.StatusOK || decision != "DENY" {
+		t.Errorf("child check = %d %s, want 200 DENY", code, decision)
+	}
+
+	// A template the writ does not admit: 403 spawn_refused.
+	call(t, ts, "POST", "/v1/templates", testToken, map[string]any{
+		"name": "deployer", "purpose": "deploys",
+		"max_caps": []string{"call:deploy/*"}, "max_ttl_seconds": 1800})
+	code, body = call(t, ts, "POST", "/v1/spawn", "", map[string]any{
+		"writ": wid, "agent": "orch", "template": "deployer", "name": "worker-2"})
+	if code != http.StatusForbidden {
+		t.Errorf("unauthorized template spawn = %d, want 403 (%v)", code, body)
+	}
+}

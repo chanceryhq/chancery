@@ -81,8 +81,8 @@ func (s *Service) StartInstance(agentName string, ttl time.Duration) (*store.Ins
 	if err != nil {
 		return nil, "", err
 	}
-	if a.State != store.StateActive {
-		return nil, "", fmt.Errorf("%w: agent %s is %s", store.ErrInactive, a.Name, a.State)
+	if err := a.ActiveErr(); err != nil {
+		return nil, "", err
 	}
 	v, err := s.St.LatestVersion(a.ID)
 	if err != nil {
@@ -109,8 +109,8 @@ func (s *Service) GrantWrit(forPrincipal, agentName string, capStrs []string, tt
 	if err != nil {
 		return "", "", err
 	}
-	if a.State != store.StateActive {
-		return "", "", fmt.Errorf("%w: cannot grant a writ to %s (%s)", store.ErrInactive, a.Name, a.State)
+	if err := a.ActiveErr(); err != nil {
+		return "", "", fmt.Errorf("cannot grant a writ: %w", err)
 	}
 	v, err := s.St.LatestVersion(a.ID)
 	if err != nil {
@@ -159,8 +159,8 @@ func (s *Service) DelegateWrit(widID, parentBlockID, childName string, caveatStr
 	if err != nil {
 		return "", nil, err
 	}
-	if child.State != store.StateActive {
-		return "", nil, fmt.Errorf("%w: child agent %s is %s", store.ErrInactive, child.Name, child.State)
+	if err := child.ActiveErr(); err != nil {
+		return "", nil, fmt.Errorf("cannot delegate: %w", err)
 	}
 	cv, err := s.St.LatestVersion(child.ID)
 	if err != nil {
@@ -188,6 +188,133 @@ func (s *Service) DelegateWrit(widID, parentBlockID, childName string, caveatStr
 	s.St.Audit(store.AuditEvent{Event: "writ.delegate", AgentID: child.ID, WritID: widID,
 		Reason: fmt.Sprintf("parent_block=%s caveats=%d", parentBlockID, len(caveats))})
 	return blockID, nw.Lineage(), nil
+}
+
+// CreateTemplate locks a pre-approved shape for runtime-spawned agents
+// (RFC-012 §4): the ceiling a human approves once, that every spawn
+// must fit inside.
+func (s *Service) CreateTemplate(name, purpose string, maxCapStrs []string, maxTTL time.Duration) (*store.Template, error) {
+	// The template name becomes the spawn resource ("spawn/<name>"), so
+	// it must be a valid concrete resource segment.
+	if err := policy.ValidateResource("spawn/" + name); err != nil {
+		return nil, fmt.Errorf("template name %q: %w", name, err)
+	}
+	if len(maxCapStrs) == 0 {
+		return nil, errors.New("a template requires at least one max capability")
+	}
+	for _, cs := range maxCapStrs {
+		if _, err := writ.ParseCap(cs); err != nil {
+			return nil, err
+		}
+	}
+	if maxTTL <= 0 {
+		return nil, errors.New("a template requires a positive --max-ttl")
+	}
+	t, err := s.St.CreateTemplate(name, purpose, maxCapStrs, maxTTL)
+	if err != nil {
+		return nil, err
+	}
+	s.St.Audit(store.AuditEvent{Event: "template.create",
+		Reason: fmt.Sprintf("name=%s max_caps=%s max_ttl=%s", name, strings.Join(maxCapStrs, ","), maxTTL)})
+	return t, nil
+}
+
+// SpawnAgent is writ-gated runtime agent creation (RFC-012): an
+// orchestrator whose writ carries `admin:spawn/<template>` registers an
+// ephemeral child within a pre-approved template and delegates it a
+// narrowed block of its own writ — one atomic operation, no admin token.
+// The spawned agent can never exceed the template ceiling, the
+// orchestrator's own authority (delegation attenuates), or the
+// template's max TTL.
+func (s *Service) SpawnAgent(widID, parentBlockID, parentName, templateName, childName string,
+	capStrs []string, ttl time.Duration,
+	promptSHA, configSHA, toolsSHA, model string) (*store.Agent, string, error) {
+
+	refuse := func(reason string) (*store.Agent, string, error) {
+		s.St.Audit(store.AuditEvent{Event: "agent.spawn_refused", WritID: widID,
+			Reason: fmt.Sprintf("parent=%s template=%s child=%s: %s", parentName, templateName, childName, reason)})
+		return nil, "", errors.New("spawn refused: " + reason)
+	}
+
+	parent, err := s.resolveAgent(parentName, "agent.spawn")
+	if err != nil {
+		return nil, "", err
+	}
+	if err := parent.ActiveErr(); err != nil {
+		return refuse(err.Error())
+	}
+	// The parent acts under ITS OWN block (never another agent's).
+	if parentBlockID == "" {
+		b, err := s.St.BlockForSubject(widID, s.Iss.SubjectURI(parent.Name))
+		if err != nil {
+			return refuse(err.Error())
+		}
+		parentBlockID = b.ID
+	} else {
+		b, err := s.St.BlockForSubject(widID, s.Iss.SubjectURI(parent.Name))
+		if err != nil || b.ID != parentBlockID {
+			return refuse(fmt.Sprintf("block %s does not belong to agent %s on writ %s", parentBlockID, parent.Name, widID))
+		}
+	}
+	// L1–L2 gate: spawning is an action like any other. The writ must
+	// carry admin:spawn/<template> (or a pattern admitting it).
+	if d := s.decide(widID, parentBlockID, "admin", "spawn/"+templateName); d.Effect != policy.Allow {
+		return refuse(fmt.Sprintf("[%s] %s", d.Layer, d.Reason))
+	}
+	tpl, err := s.St.GetTemplate(templateName)
+	if err != nil {
+		return refuse(err.Error())
+	}
+	// Every requested capability must fit under some template max-cap.
+	var caveats []string
+	for _, cs := range capStrs {
+		c, err := writ.ParseCap(cs)
+		if err != nil {
+			return refuse(err.Error())
+		}
+		ok := false
+		for _, ms := range tpl.MaxCaps {
+			if m, err := writ.ParseCap(ms); err == nil && m.Implies(c) {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return refuse(fmt.Sprintf("capability %s exceeds template %s ceiling (%s)",
+				c, tpl.Name, strings.Join(tpl.MaxCaps, ", ")))
+		}
+		caveats = append(caveats, cs)
+	}
+	if len(caveats) == 0 {
+		// No explicit request = the full template ceiling.
+		caveats = tpl.MaxCaps
+	}
+	if ttl <= 0 {
+		ttl = tpl.MaxTTL
+	}
+	if ttl > tpl.MaxTTL {
+		return refuse(fmt.Sprintf("ttl %s exceeds template max %s", ttl, tpl.MaxTTL))
+	}
+	expiresAt := time.Now().UTC().Add(ttl)
+	child, err := s.St.CreateSpawnedAgent(childName, parent.Owner, tpl.Purpose,
+		parent.Name, tpl.Name, expiresAt)
+	if err != nil {
+		return refuse(err.Error())
+	}
+	if _, err := s.St.CreateVersion(child.ID, promptSHA, configSHA, toolsSHA, model); err != nil {
+		return nil, "", err
+	}
+	s.St.Audit(store.AuditEvent{Event: "agent.spawn", AgentID: child.ID, WritID: widID,
+		Reason: fmt.Sprintf("parent=%s template=%s expires=%s", parent.Name, tpl.Name,
+			expiresAt.Format(time.RFC3339))})
+	blockID, _, err := s.DelegateWrit(widID, parentBlockID, childName, caveats, ttl)
+	if err != nil {
+		// The delegation is the child's authority; without it the spawn
+		// is void. Retire the just-created identity so it cannot linger.
+		s.St.SetAgentState(childName, store.StateRetired)
+		return refuse("delegation failed: " + err.Error())
+	}
+	return child, blockID, nil
 }
 
 // CheckAction is the full PDP evaluation for one concrete action
@@ -233,9 +360,8 @@ func (s *Service) decide(widID, leafBlockID, verb, resource string) policy.Decis
 	leafURI := w.Blocks[len(w.Blocks)-1].To
 	if name, ok := strings.CutPrefix(leafURI, "spiffe://"+s.Iss.TrustDomain+"/agent/"); ok {
 		if a, err := s.St.GetAgentByName(name); err == nil {
-			if a.State != store.StateActive {
-				return policy.Decision{Effect: policy.Deny, Layer: "registry",
-					Reason: fmt.Sprintf("acting agent %s is %s", name, a.State)}
+			if err := a.ActiveErr(); err != nil {
+				return policy.Decision{Effect: policy.Deny, Layer: "registry", Reason: err.Error()}
 			}
 			allowlist, _ = s.St.GetAllowlist(a.ID)
 		}

@@ -139,6 +139,7 @@ phase. A threat model that hides its gaps is marketing.
 | G7 | No mlock/zeroization in broker | Secrets in swappable memory during injection | hardening backlog |
 | G8 | No key-rotation runbook/automation | Slow recovery from issuer-key compromise | v1 |
 | G9 | Declared attestation | Instance can lie about runtime | RFC-001 verifiers · v1 |
+| G10 | Writ-gated spawn is capability-URL (no PoP) | Knowing writ+agent ids ≈ bearer for `/v1/spawn`, bounded by the writ's own PDP gate | RFC-012 · v1 (`dk` proof-of-possession) |
 
 ## 6. What this means for RFC-010
 

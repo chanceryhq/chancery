@@ -9,9 +9,11 @@ import (
 	"strings"
 )
 
-// Verbs is the locked verb registry (RFC-004 §4). call is the MVP verb;
-// the rest are reserved for the HTTP/shell/browser runtimes (RFC-005).
-var Verbs = map[string]bool{"call": true, "read": true, "write": true, "exec": true, "net": true}
+// Verbs is the locked verb registry (RFC-004 §4, extended by RFC-012).
+// call is the MVP verb; read/write/exec/net are reserved for the
+// HTTP/shell/browser runtimes (RFC-005); admin governs control-plane
+// self-service actions such as spawning agents (RFC-012).
+var Verbs = map[string]bool{"call": true, "read": true, "write": true, "exec": true, "net": true, "admin": true}
 
 // DenyAll is the explicit deny-all allow-list sentinel: an empty
 // allow-list means "no additional restriction", never deny-all.
@@ -37,7 +39,7 @@ func ParseCap(s string) (Cap, error) {
 
 func (c Cap) Validate() error {
 	if c.Verb != "*" && !Verbs[c.Verb] {
-		return fmt.Errorf("policy: unknown verb %q (registry: call, read, write, exec, net, *)", c.Verb)
+		return fmt.Errorf("policy: unknown verb %q (registry: call, read, write, exec, net, admin, *)", c.Verb)
 	}
 	return ValidateResourcePattern(c.Resource)
 }
@@ -106,6 +108,42 @@ func MatchResource(pattern, resource string) bool {
 		return !strings.Contains(resource[len(prefix):], "/")
 	}
 	return pattern == resource
+}
+
+// Implies reports whether c subsumes o: every action o admits, c also
+// admits. Used for template ceilings (RFC-012 §4): a spawn request's
+// capability must be implied by some template max-cap. Strict — when in
+// doubt, false (deny).
+func (c Cap) Implies(o Cap) bool {
+	if c.Verb != "*" && c.Verb != o.Verb {
+		return false
+	}
+	return PatternImplies(c.Resource, o.Resource)
+}
+
+// PatternImplies reports whether pattern a admits every resource that
+// pattern b admits.
+func PatternImplies(a, b string) bool {
+	if a == "*" {
+		return true
+	}
+	if b == "*" {
+		return false
+	}
+	ap, aw := strings.CutSuffix(a, "*")
+	bp, _ := strings.CutSuffix(b, "*")
+	if !aw {
+		// A concrete pattern implies only itself.
+		return a == b
+	}
+	if !strings.HasPrefix(bp, ap) {
+		return false
+	}
+	if strings.HasSuffix(ap, "/") {
+		return true // subtree wildcard covers everything below the prefix
+	}
+	// Final-segment wildcard: b must stay within a's final segment.
+	return !strings.Contains(bp[len(ap):], "/")
 }
 
 // Overlaps reports whether two patterns can admit at least one common

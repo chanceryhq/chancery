@@ -78,6 +78,11 @@ Agent:    active ⇄ suspended        (reversible, operational)
           active|suspended → orphaned (owner lost; → active only via
                                        ownership transfer; → retired/revoked)
 
+          [RFC-012] ephemeral spawned agents additionally carry a hard
+          expires_at: past it they are denied in-path while nominally
+          active (lazy expiry, fail closed), and `agent sweep` moves
+          them active → retired through this same legal transition.
+
 Version:  active → revoked           (terminal; "recall this prompt")
 Instance: active → revoked           (terminal; instances are ephemeral —
                                       there is nothing to resume)

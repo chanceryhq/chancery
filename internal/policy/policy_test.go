@@ -123,3 +123,40 @@ func TestDecideLayers(t *testing.T) {
 		t.Errorf("unknown verb must deny at grammar layer, got %+v", d)
 	}
 }
+
+// RFC-012: admin is a registered verb; Implies is the template-ceiling
+// subsumption check — strict, deny when in doubt.
+func TestAdminVerbAndImplies(t *testing.T) {
+	if _, err := ParseCap("admin:spawn/researcher"); err != nil {
+		t.Fatalf("admin verb must parse: %v", err)
+	}
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"call:*", "call:github/get_repo", true},
+		{"call:github/*", "call:github/get_*", true},
+		{"call:github/*", "call:github/sub/tree", true},
+		{"call:github/get_*", "call:github/get_repo", true},
+		{"call:github/get_*", "call:github/*", false},         // narrower cannot imply wider
+		{"call:github/get_*", "call:github/get_x/y", false},   // final-segment stays in segment
+		{"call:github/get_repo", "call:github/get_repo", true},
+		{"call:github/get_repo", "call:github/get_*", false},  // concrete implies only itself
+		{"call:github/*", "read:github/x", false},             // verb mismatch
+		{"admin:spawn/*", "admin:spawn/researcher", true},
+		{"call:slack/*", "call:github/x", false},
+	}
+	for _, c := range cases {
+		a, err := ParseCap(c.a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := ParseCap(c.b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := a.Implies(b); got != c.want {
+			t.Errorf("Implies(%s, %s) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}

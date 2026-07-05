@@ -59,18 +59,18 @@ work end to end, and it's what the README's "60-second story" refers to.
 
 The tests are organized to prove the RFC each package implements — a
 good way to learn the codebase is to read a package's `*_test.go`
-alongside its RFC. 62 test functions across 10 packages:
+alongside its RFC. 72 test functions across 10 packages:
 
 | Package | Implements | The tests prove |
 |---|---|---|
 | `internal/store` | RFC-001, 006, 007 | three-layer revocation, append-only versions, lifecycle state machine (legal + illegal transitions), audit hash-chain + tamper detection |
 | `internal/identity` | RFC-001 | ES256 issue/verify, TTL ceiling, key persistence, and the adversarial set: `alg:none` + HS256 key-confusion rejected (RFC-009) |
 | `internal/writ` | RFC-002 | effective authority = grant ∩ caveats, **widening is unrepresentable**, TTL monotonicity, depth bound, tamper/splice/cross-writ rejection |
-| `internal/policy` | RFC-004 | capability grammar validation + match semantics, layered PDP (only the writ grants), empty-list vs `!none` sentinel |
+| `internal/policy` | RFC-004, 012 | capability grammar validation + match semantics, layered PDP (only the writ grants), empty-list vs `!none` sentinel, `admin` verb + `Implies` subsumption |
 | `internal/seal` | RFC-003 | AEAD roundtrip, no plaintext on disk, name-bound (cross-name swap rejected), wrong-key/tamper fail-closed |
 | `internal/mcp` | RFC-005 | tools/call allow/deny, tools/list filtering, malformed-frame handling, deny-on-audit-failure |
-| `internal/service` | RFC-004, 008 | the shared CLI+API path end-to-end; shadow-agent (`agent.unregistered_ref`) observation |
-| `internal/api` | RFC-008 | httptest full flow, auth rejection, DENY-as-HTTP-200, terminality over the wire, token never in audit |
+| `internal/service` | RFC-004, 008, 012 | the shared CLI+API path end-to-end; shadow-agent (`agent.unregistered_ref`) observation; writ-gated spawn (template ceiling, TTL cap, refusal audit, lazy expiry + sweep) |
+| `internal/api` | RFC-008, 012 | httptest full flow, auth rejection, DENY-as-HTTP-200, terminality over the wire, token never in audit; tokenless writ-gated `/v1/spawn` |
 | `sdk` | RFC-010 | the Go SDK against a real control plane (advisory Guard/Guarded) |
 | `cmd/chancery` | RFC-005 | the `mcp wrap` binary driving a real child MCP server, incl. mid-session revocation + audit integrity |
 
@@ -89,7 +89,7 @@ internal/
   api/               REST/JSON /v1 control-plane surface (RFC-008)
 sdk/                 Go SDK — advisory ergonomics over the API
 examples/            claude-code (.mcp.json), go-agent, langgraph
-rfcs/                every design decision, argued and locked (000–011)
+rfcs/                every design decision, argued and locked (000–012)
 scripts/demo.sh      the 60-second demo
 ```
 
