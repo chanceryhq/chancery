@@ -81,6 +81,10 @@ homebrew_casks:
     repository:
       owner: chanceryhq
       name: homebrew-tap
+      # Use the cross-repo PAT (release.yml sets this from the
+      # TAP_GITHUB_TOKEN secret); without it goreleaser falls back to the
+      # default Actions token, which cannot write to another repo → 403.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/chanceryhq/chancery"
     description: "The identity provider for AI agents"
     license: "Apache-2.0"
