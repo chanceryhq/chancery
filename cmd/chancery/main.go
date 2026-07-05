@@ -193,6 +193,31 @@ func agentCmd() *cobra.Command {
 	register.MarkFlagRequired("owner")
 	register.MarkFlagRequired("purpose")
 
+	var vPrompt, vConfig, vTools, vModel string
+	version := &cobra.Command{
+		Use:   "version <name>",
+		Short: "Record a new immutable version of an agent (RFC-001: change = new version)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			a, v, err := e.svc.AddVersion(args[0], hashArg(vPrompt), hashArg(vConfig), hashArg(vTools), vModel)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("%s\n  version  %d (%s)  — supersedes prior; old versions kept\n",
+				e.iss.SubjectURI(a.Name), v.Seq, v.Digest())
+			return nil
+		},
+	}
+	version.Flags().StringVar(&vPrompt, "prompt", "", "system prompt: file path or literal (hashed, never stored)")
+	version.Flags().StringVar(&vConfig, "config", "", "configuration: file path or literal (hashed, never stored)")
+	version.Flags().StringVar(&vTools, "tools", "", "tool manifest: file path or literal (hashed, never stored)")
+	version.Flags().StringVar(&vModel, "model", "", "model identifier")
+
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List registered agents",
@@ -353,7 +378,7 @@ func agentCmd() *cobra.Command {
 	transfer.Flags().StringVar(&newOwner, "owner", "", "new accountable owner principal (required)")
 	transfer.MarkFlagRequired("owner")
 
-	cmd.AddCommand(register, list, describe, allow, transfer,
+	cmd.AddCommand(register, version, list, describe, allow, transfer,
 		state("suspend", "Suspend an agent (reversible)", store.StateSuspended),
 		state("resume", "Reactivate a suspended agent", store.StateActive),
 		state("retire", "Retire an agent — terminal, administrative end-of-life", store.StateRetired),

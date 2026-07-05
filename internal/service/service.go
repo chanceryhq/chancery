@@ -56,6 +56,24 @@ func (s *Service) RegisterAgent(name, owner, purpose, promptSHA, configSHA, tool
 	return a, v, nil
 }
 
+// AddVersion records a new immutable version of an existing agent
+// (RFC-001): change the prompt/config/tools/model and it is a new
+// content-addressed version, superseding the prior one. Old versions are
+// never edited — they remain queryable for attribution.
+func (s *Service) AddVersion(agentName, promptSHA, configSHA, toolsSHA, model string) (*store.Agent, *store.Version, error) {
+	a, err := s.resolveAgent(agentName, "agent.version")
+	if err != nil {
+		return nil, nil, err
+	}
+	v, err := s.St.CreateVersion(a.ID, promptSHA, configSHA, toolsSHA, model)
+	if err != nil {
+		return nil, nil, err
+	}
+	s.St.Audit(store.AuditEvent{Event: "agent.version", AgentID: a.ID,
+		Reason: fmt.Sprintf("seq=%d version=%s", v.Seq, v.Digest())})
+	return a, v, nil
+}
+
 // StartInstance registers a runtime instance and issues its first
 // identity document (RFC-001).
 func (s *Service) StartInstance(agentName string, ttl time.Duration) (*store.Instance, string, error) {

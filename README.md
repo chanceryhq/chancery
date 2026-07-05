@@ -82,6 +82,7 @@ any edit, deletion, or reorder. Known MVP gaps are published in
 
 - [**Quickstart (MCP)**](QUICKSTART.md) — govern the real filesystem MCP server in 5 minutes
 - [**Governing any agent**](docs/governing-any-agent.md) — the non-MCP path: identity, policy, revocation, audit for any job in any language
+- [**Verify every claim yourself**](docs/verify.md) — hands-on, by-hand checks that each RFC (001–009) does what it says
 - [Concepts](docs/concepts.md) — agent, version, instance, writ
 - [Claude Code / MCP client setup](examples/claude-code/README.md) — the `.mcp.json` drop-in
 - [Go SDK](sdk/) and [example agent](examples/go-agent/) — advisory in-process checks over the API

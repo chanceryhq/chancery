@@ -58,6 +58,40 @@ func TestShadowAgentObservation(t *testing.T) {
 	}
 }
 
+func TestAddVersionSupersedesAndKeepsHistory(t *testing.T) {
+	// RFC-001: changing the content makes a new immutable version; old
+	// versions are kept.
+	s := testService(t)
+	_, v1, err := s.RegisterAgent("bot", "user:a@acme.com", "t", "p1", "c1", "tl1", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, v2, err := s.AddVersion("bot", "p2-changed", "c1", "tl1", "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v2.Seq != 2 {
+		t.Errorf("new version seq = %d, want 2", v2.Seq)
+	}
+	if v1.Digest() == v2.Digest() {
+		t.Error("a changed prompt must produce a different content digest")
+	}
+	all, err := s.St.ListVersions(v2.AgentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Errorf("history length = %d, want 2 (old versions kept)", len(all))
+	}
+	// Versioning an unknown agent is a shadow-agent signal.
+	if _, _, err := s.AddVersion("ghost", "p", "c", "tl", "m"); err == nil {
+		t.Fatal("versioning an unknown agent must error")
+	}
+	if !hasShadowEvent(t, s, "ghost") {
+		t.Error("versioning an unregistered agent must emit agent.unregistered_ref")
+	}
+}
+
 func TestRegisteredAgentEmitsNoShadowEvent(t *testing.T) {
 	s := testService(t)
 	if _, _, err := s.RegisterAgent("real-bot", "user:a@acme.com", "t", "p", "c", "tl", "m"); err != nil {
