@@ -14,6 +14,15 @@ stored.
 Single Go binary. Apache-2.0. MCP-first, then HTTP, shell, browser.
 Try the 60-second story: `make demo`.
 
+**MCP-first, not MCP-only.** The registry, writs/delegation, policy,
+sealed credentials, and audit govern *any* agent in any language today
+(LangGraph, CrewAI, a cron job, a shell script) via the decision API —
+see [Governing any agent](docs/governing-any-agent.md). What's MCP-
+specific today is the *unbypassable, in-path* enforcement (`mcp wrap`);
+for other runtimes you use advisory checks now and switch to in-path
+enforcement as those PEPs land (HTTP → shell → browser), with the same
+writs.
+
 **Two promises** ([RFC-011](rfcs/011-open-core-boundary.md)): what
 ships open source stays Apache-2.0 — no license flip, ever; and
 security is never paywalled — every gap in [SECURITY.md](SECURITY.md)
@@ -71,7 +80,8 @@ any edit, deletion, or reorder. Known MVP gaps are published in
 
 ## Guides
 
-- [**Quickstart**](QUICKSTART.md) — govern the real filesystem MCP server in 5 minutes
+- [**Quickstart (MCP)**](QUICKSTART.md) — govern the real filesystem MCP server in 5 minutes
+- [**Governing any agent**](docs/governing-any-agent.md) — the non-MCP path: identity, policy, revocation, audit for any job in any language
 - [Concepts](docs/concepts.md) — agent, version, instance, writ
 - [Claude Code / MCP client setup](examples/claude-code/README.md) — the `.mcp.json` drop-in
 - [Go SDK](sdk/) and [example agent](examples/go-agent/) — advisory in-process checks over the API
