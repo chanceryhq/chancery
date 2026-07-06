@@ -13,8 +13,9 @@ and payloads are never stored.
 Single Go binary. Apache-2.0. MCP-first, then HTTP, shell, browser.
 
 - [Quickstart](https://github.com/chanceryhq/chancery/blob/main/QUICKSTART.md) — govern a real MCP server in 5 minutes
-- [Concepts](concepts.md) — agent, version, instance, writ
-- [Examples](https://github.com/chanceryhq/chancery/tree/main/examples) — Claude Code, Go SDK, LangGraph
+- [Testing playbook](testing-playbook.md) — every feature, one guided ~20-minute run
+- [Concepts](concepts.md) — agent, version, instance, writ, template
+- [Examples](https://github.com/chanceryhq/chancery/tree/main/examples) — Claude Code, browser agents, Go SDK, LangGraph
 - [Design RFCs](https://github.com/chanceryhq/chancery/tree/main/rfcs) — every decision, argued
 - [Security posture](https://github.com/chanceryhq/chancery/blob/main/SECURITY.md) — the honest gap table
 

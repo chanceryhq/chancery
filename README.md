@@ -115,7 +115,8 @@ any edit, deletion, or reorder. Known MVP gaps are published in
 
 - [**Quickstart (MCP)**](QUICKSTART.md) — govern the real filesystem MCP server in 5 minutes
 - [**Governing any agent**](docs/governing-any-agent.md) — the non-MCP path: identity, policy, revocation, audit for any job in any language
-- [**Verify every claim yourself**](docs/verify.md) — hands-on, by-hand checks that each RFC (001–009) does what it says
+- [**Testing playbook**](docs/testing-playbook.md) — one guided ~20-minute run through every feature (001–013), with expected output at each step
+- [**Verify every claim yourself**](docs/verify.md) — hands-on, by-hand checks that each RFC does what it says
 - [Concepts](docs/concepts.md) — agent, version, instance, writ
 - [**Browser agents**](examples/browser-agent/README.md) — custodied sessions + scoped navigation for Playwright MCP
 - [Claude Code / MCP client setup](examples/claude-code/README.md) — the `.mcp.json` drop-in

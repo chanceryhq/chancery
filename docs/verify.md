@@ -289,4 +289,7 @@ rm -rf "$CHANCERY_DATA"     # clean up the throwaway state
 
 Every guarantee above is also locked by an automated test (see
 [CONTRIBUTING.md](../CONTRIBUTING.md) for the package→RFC map); this doc
-just lets you watch them hold with your own hands.
+just lets you watch them hold with your own hands. For a single guided
+run through every feature in order — with expected output and a
+troubleshooting table — use the
+[testing playbook](testing-playbook.md).
