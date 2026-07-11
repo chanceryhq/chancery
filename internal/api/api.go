@@ -82,6 +82,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	// The read-only dashboard (RFC-014). The page is static and holds
+	// no data — every data call it makes carries the bearer token.
+	mux.HandleFunc("GET /ui", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write(uiHTML)
+	})
 
 	mux.HandleFunc("POST /v1/agents", s.authed(s.registerAgent))
 	mux.HandleFunc("GET /v1/agents", s.authed(s.listAgents))
@@ -99,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/spawn", s.spawnAgent)
 	mux.HandleFunc("POST /v1/writs", s.authed(s.grantWrit))
 	mux.HandleFunc("GET /v1/writs", s.authed(s.listWrits))
+	mux.HandleFunc("GET /v1/writs/{id}", s.authed(s.getWrit))
 	mux.HandleFunc("POST /v1/writs/{id}/delegate", s.authed(s.delegateWrit))
 	mux.HandleFunc("POST /v1/writs/{id}/check", s.authed(s.checkWrit))
 	mux.HandleFunc("POST /v1/writs/{id}/revoke", s.authed(s.revokeWrit))
@@ -378,6 +385,37 @@ func (s *Server) listWrits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"writs": writs, "next": nil})
+}
+
+// getWrit returns a writ's metadata and its delegation tree (RFC-014;
+// the route RFC-008 documented). JWS material is omitted: the UI needs
+// shape and lineage, not signable credentials.
+func (s *Server) getWrit(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	meta, err := s.Svc.St.GetWrit(id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	blocks, err := s.Svc.St.Tree(id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	type uiBlock struct {
+		ID        string     `json:"id"`
+		ParentID  *string    `json:"parent_id"`
+		Depth     int        `json:"depth"`
+		ToAgent   string     `json:"to_agent"`
+		Exp       time.Time  `json:"exp"`
+		RevokedAt *time.Time `json:"revoked_at"`
+	}
+	out := make([]uiBlock, 0, len(blocks))
+	for _, b := range blocks {
+		out = append(out, uiBlock{ID: b.ID, ParentID: b.ParentID, Depth: b.Depth,
+			ToAgent: b.ToAgent, Exp: b.Exp, RevokedAt: b.RevokedAt})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"writ": meta, "blocks": out})
 }
 
 func (s *Server) delegateWrit(w http.ResponseWriter, r *http.Request) {

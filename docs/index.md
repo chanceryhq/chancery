@@ -14,6 +14,7 @@ Single Go binary. Apache-2.0. MCP-first, then HTTP, shell, browser.
 
 - [Quickstart](https://github.com/chanceryhq/chancery/blob/main/QUICKSTART.md) — govern a real MCP server in 5 minutes
 - [Testing playbook](testing-playbook.md) — every feature, one guided ~20-minute run
+- [Dashboard](https://github.com/chanceryhq/chancery/blob/main/rfcs/014-read-only-dashboard.md) — `chancery serve` + open `/ui`: timeline, roster, delegation tree
 - [Concepts](concepts.md) — agent, version, instance, writ, template
 - [Examples](https://github.com/chanceryhq/chancery/tree/main/examples) — Claude Code, browser agents, Go SDK, LangGraph
 - [Design RFCs](https://github.com/chanceryhq/chancery/tree/main/rfcs) — every decision, argued

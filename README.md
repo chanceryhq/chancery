@@ -106,7 +106,12 @@ per-URL, in-path, fail-closed:
 ```
 
 Run the control plane as an HTTP API with `./chancery serve`
-(REST/JSON under `/v1`; the admin token is printed once at `init`).
+(REST/JSON under `/v1`; the admin token is printed once at `init`) —
+and open **http://127.0.0.1:7423/ui** for the embedded **read-only
+dashboard** ([RFC-014](rfcs/014-read-only-dashboard.md)): the live
+audit timeline with a permanent integrity badge, the agent roster
+with spawn provenance, and the delegation tree rendered as a tree.
+Writes (grant, revoke, seal) deliberately stay in the CLI/API.
 The audit timeline is hash-chained — `./chancery audit verify` detects
 any edit, deletion, or reorder. Known MVP gaps are published in
 [RFC-009 §5](rfcs/009-threat-model.md).
@@ -115,7 +120,7 @@ any edit, deletion, or reorder. Known MVP gaps are published in
 
 - [**Quickstart (MCP)**](QUICKSTART.md) — govern the real filesystem MCP server in 5 minutes
 - [**Governing any agent**](docs/governing-any-agent.md) — the non-MCP path: identity, policy, revocation, audit for any job in any language
-- [**Testing playbook**](docs/testing-playbook.md) — one guided ~20-minute run through every feature (001–013), with expected output at each step
+- [**Testing playbook**](docs/testing-playbook.md) — one guided ~20-minute run through every feature (001–014), with expected output at each step
 - [**Verify every claim yourself**](docs/verify.md) — hands-on, by-hand checks that each RFC does what it says
 - [Concepts](docs/concepts.md) — agent, version, instance, writ
 - [**Browser agents**](examples/browser-agent/README.md) — custodied sessions + scoped navigation for Playwright MCP
@@ -132,7 +137,7 @@ a prompt-injected agent cannot talk its way around.
 ```sh
 git clone https://github.com/chanceryhq/chancery && cd chancery
 make build      # -> ./chancery  (Go 1.26+, no CGO, single static binary)
-make test       # go vet + 78 tests across 10 packages, in seconds
+make test       # go vet + 79 tests across 10 packages, in seconds
 make demo       # the 60-second enforcement + audit arc, end to end
 ```
 
@@ -160,3 +165,4 @@ Design happens as a series of locked decisions, one RFC at a time
 | [011](rfcs/011-open-core-boundary.md) | Open-core boundary | In Review |
 | [012](rfcs/012-dynamic-agent-creation.md) | Dynamic agent creation (writ-gated runtime spawn) | In Review |
 | [013](rfcs/013-browser-sessions-and-tokens.md) | Browser sessions and tokens as governed credentials | In Review |
+| [014](rfcs/014-read-only-dashboard.md) | Read-only dashboard (`/ui`) | In Review |

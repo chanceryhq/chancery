@@ -1,6 +1,6 @@
 # The Chancery Testing Playbook
 
-A complete, guided test run of every feature (RFC-001 → RFC-013) in
+A complete, guided test run of every feature (RFC-001 → RFC-014) in
 one sitting, ~20 minutes. Each step says **what you're testing**,
 **the commands**, and **what you must see**. Every command here has
 been run verbatim against the current build — if something differs,
@@ -232,6 +232,14 @@ curl -s -X POST localhost:7423/v1/writs/$W/check -d '{}'   # no token
 auth attempt was itself recorded (with no token material). Leave
 `serve` running for step 10.
 
+**Now open the dashboard (RFC-014):** visit
+`http://127.0.0.1:7423/ui` in a browser and paste `$TOKEN`. You get
+the live timeline (with the integrity badge running `audit verify`
+continuously), the agent roster, the **delegation tree drawn as a
+tree**, and templates — all read-only: notice there is no button
+that grants, revokes, or seals anything. That's RFC-014's locked
+scope, not a missing feature.
+
 ## 9. Adversarial checks (RFC-009)
 
 *Testing: forged credentials fail.*
@@ -340,7 +348,7 @@ make demo
 make test
 ```
 
-**Expect:** `go vet` clean and 78 tests across 10 packages green —
+**Expect:** `go vet` clean and 79 tests across 10 packages green —
 every step in this playbook is also locked by at least one of them
 (the map is in [CONTRIBUTING.md](../CONTRIBUTING.md)).
 

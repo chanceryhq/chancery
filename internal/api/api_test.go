@@ -291,3 +291,57 @@ func TestSpawnOverHTTPWritGated(t *testing.T) {
 		t.Errorf("unauthorized template spawn = %d, want 403 (%v)", code, body)
 	}
 }
+
+// RFC-014: the dashboard page serves without auth but contains no data;
+// the writ tree endpoint is authed and returns the lineage shape.
+func TestDashboardAndWritTree(t *testing.T) {
+	ts := testServer(t)
+
+	resp, err := http.Get(ts.URL + "/ui")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := make([]byte, 1<<20)
+	n, _ := resp.Body.Read(body)
+	resp.Body.Close()
+	page := string(body[:n])
+	if resp.StatusCode != http.StatusOK || !strings.Contains(page, "Chancery") {
+		t.Fatalf("/ui = %d", resp.StatusCode)
+	}
+	// The static page must never embed data (RFC-014 §8).
+	if strings.Contains(page, "acme.com") || strings.Contains(page, "w_01") {
+		t.Error("/ui must not contain registry data")
+	}
+
+	call(t, ts, "POST", "/v1/agents", testToken, map[string]any{
+		"name": "parent", "owner": "user:a@acme.com", "purpose": "p"})
+	call(t, ts, "POST", "/v1/agents", testToken, map[string]any{
+		"name": "child", "owner": "user:a@acme.com", "purpose": "p"})
+	_, body2 := call(t, ts, "POST", "/v1/writs", testToken, map[string]any{
+		"for": "user:a@acme.com", "to": "parent", "caps": []string{"call:x/*"}, "ttl_seconds": 600})
+	var wid string
+	json.Unmarshal(body2["writ"], &wid)
+	call(t, ts, "POST", "/v1/writs/"+wid+"/delegate", testToken, map[string]any{
+		"to": "child", "caveats": []string{"call:x/y*"}, "ttl_seconds": 300})
+
+	// Unauthed: 401. Authed: two blocks, root->leaf, no JWS anywhere.
+	code, _ := call(t, ts, "GET", "/v1/writs/"+wid, "", nil)
+	if code != http.StatusUnauthorized {
+		t.Errorf("unauthed writ tree = %d, want 401", code)
+	}
+	code, body3 := call(t, ts, "GET", "/v1/writs/"+wid, testToken, nil)
+	if code != http.StatusOK {
+		t.Fatalf("writ tree = %d", code)
+	}
+	var blocks []map[string]any
+	json.Unmarshal(body3["blocks"], &blocks)
+	if len(blocks) != 2 || blocks[0]["depth"].(float64) != 0 || blocks[1]["depth"].(float64) != 1 {
+		t.Errorf("tree blocks wrong: %v", blocks)
+	}
+	if strings.Contains(string(body3["blocks"]), "eyJ") {
+		t.Error("writ tree must not expose JWS material")
+	}
+	if code, _ := call(t, ts, "GET", "/v1/writs/w_nope", testToken, nil); code != http.StatusNotFound {
+		t.Errorf("unknown writ = %d, want 404", code)
+	}
+}

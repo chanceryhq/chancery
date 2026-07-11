@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chancery</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#151b24; --panel2:#1b2330; --line:#26303e;
+    --ink:#dce3ec; --dim:#8494a8; --faint:#5a6a7e;
+    --gold:#d4a843; --allow:#3fb27f; --deny:#e05d5d; --hold:#d4a843;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:17px;font-weight:650;letter-spacing:.4px}
+  header h1 .c{color:var(--gold)}
+  header .sub{color:var(--faint);font-size:12px}
+  #integrity{margin-left:auto;font-size:12px;padding:4px 12px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+  #integrity.ok{color:var(--allow);border-color:rgba(63,178,127,.4)}
+  #integrity.bad{color:var(--deny);border-color:rgba(224,93,93,.5);font-weight:600}
+  nav{display:flex;gap:2px;padding:10px 22px 0;border-bottom:1px solid var(--line)}
+  nav button{background:none;border:none;color:var(--dim);font:inherit;font-size:13px;padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent}
+  nav button.on{color:var(--ink);border-bottom-color:var(--gold)}
+  main{padding:18px 22px;max-width:1200px}
+  .bar{display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap}
+  input[type=text],input[type=password],select{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:7px 11px;font:inherit;font-size:13px}
+  input[type=text]{min-width:260px}
+  .btn{background:var(--gold);color:#1a1408;border:none;border-radius:7px;padding:7px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+  .btn.ghost{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{color:var(--faint);text-align:left;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.7px;padding:8px 12px;border-bottom:1px solid var(--line)}
+  td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  td:not(:last-child){white-space:nowrap}
+  tr:hover td{background:rgba(255,255,255,.02)}
+  .mono{font-family:var(--mono);font-size:12px}
+  .dim{color:var(--dim)} .faint{color:var(--faint)}
+  .pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:11px;font-weight:600;letter-spacing:.3px}
+  .p-allow{background:rgba(63,178,127,.13);color:var(--allow)}
+  .p-deny{background:rgba(224,93,93,.13);color:var(--deny)}
+  .p-active{background:rgba(63,178,127,.13);color:var(--allow)}
+  .p-suspended{background:rgba(212,168,67,.15);color:var(--gold)}
+  .p-revoked,.p-retired,.p-expired{background:rgba(224,93,93,.13);color:var(--deny)}
+  .p-orphaned{background:rgba(132,148,168,.15);color:var(--dim)}
+  .tree{font-family:var(--mono);font-size:12.5px;line-height:1.9;padding:14px 16px;background:var(--panel);border:1px solid var(--line);border-radius:9px;margin:8px 0 18px}
+  .tree .rev{color:var(--deny);text-decoration:line-through}
+  .tree .arm{color:var(--faint)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-bottom:18px}
+  #gate{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:70vh;gap:14px}
+  [hidden]{display:none!important}
+  #gate p{color:var(--dim);max-width:440px;text-align:center;font-size:13px}
+  .err{color:var(--deny);font-size:13px}
+  .empty{color:var(--faint);padding:22px;text-align:center}
+  footer{color:var(--faint);font-size:11.5px;padding:8px 22px 24px}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="c">⚖</span> Chancery</h1>
+  <span class="sub">read-only · the control plane is the CLI/API</span>
+  <span id="integrity">integrity: checking…</span>
+</header>
+<nav id="nav" hidden>
+  <button data-v="timeline" class="on">Timeline</button>
+  <button data-v="agents">Agents</button>
+  <button data-v="writs">Writs</button>
+  <button data-v="templates">Templates</button>
+</nav>
+<main>
+  <div id="gate">
+    <h1 style="font-size:20px"><span style="color:var(--gold)">⚖</span> Chancery</h1>
+    <p>Paste the admin token printed by <span class="mono">chancery init</span>.
+       It is kept in this tab's session storage only and used for read-only
+       <span class="mono">/v1</span> calls.</p>
+    <div class="bar">
+      <input type="password" id="tok" placeholder="chy_…" size="42">
+      <button class="btn" id="go">View</button>
+    </div>
+    <div class="err" id="gateErr"></div>
+  </div>
+  <div id="view" hidden></div>
+</main>
+<footer>Every row above is hash-chained; <span class="mono">chancery audit verify</span> proves it. Writes (grant, revoke, seal) happen in the CLI — by design (RFC-014).</footer>
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+let TOKEN=sessionStorage.getItem("chancery_token")||"";
+let VIEW="timeline", agentsById={}, pollT=null;
+
+async function api(path){
+  const r=await fetch(path,{headers:{Authorization:"Bearer "+TOKEN}});
+  if(!r.ok) throw new Error(path+" → "+r.status);
+  return r.json();
+}
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
+function pill(text,kind){const s=el("span","pill p-"+kind,text);return s}
+function ts(v){if(!v)return"";const d=new Date(v);return isNaN(d)?String(v):d.toISOString().replace("T"," ").slice(0,19)}
+
+async function integrity(){
+  try{
+    const j=await api("/v1/audit/verify");
+    const b=$("#integrity");
+    if(j.intact){b.className="ok";b.textContent="integrity: verified ✓ ("+j.verified+" events)"}
+    else{b.className="bad";b.textContent="⚠ INTEGRITY FAILURE — "+(j.error||"chain broken")}
+  }catch(e){}
+}
+
+async function loadAgents(){
+  const j=await api("/v1/agents");
+  agentsById={};
+  (j.agents||[]).forEach(a=>agentsById[a.ID]=a);
+  return j.agents||[];
+}
+function effState(a){
+  if(a.State==="active"&&a.ExpiresAt&&new Date(a.ExpiresAt)<new Date())return"expired";
+  return a.State;
+}
+
+function renderTable(head,rows){
+  const t=el("table"),tr=el("tr");
+  head.forEach(h=>tr.appendChild(el("th",null,h)));
+  const thead=el("thead");thead.appendChild(tr);t.appendChild(thead);
+  const tb=el("tbody");
+  rows.forEach(cells=>{const r=el("tr");cells.forEach(c=>{const td=el("td");
+    (c instanceof Node)?td.appendChild(c):td.textContent=c??"";r.appendChild(td)});tb.appendChild(r)});
+  t.appendChild(tb);
+  const card=el("div","card");card.appendChild(t);
+  if(!rows.length)card.appendChild(el("div","empty","nothing here yet"));
+  return card;
+}
+
+async function vTimeline(root){
+  const bar=el("div","bar");
+  const q=el("input");q.type="text";q.placeholder="filter (agent, event, tool, writ…)";q.id="q";
+  const sel=el("select");["all","ALLOW","DENY"].forEach(o=>{const op=el("option",null,o);op.value=o;sel.appendChild(op)});
+  bar.append(q,sel);root.appendChild(bar);
+  const holder=el("div");root.appendChild(holder);
+  async function refresh(){
+    await loadAgents();
+    const j=await api("/v1/audit?limit=200");
+    const f=q.value.toLowerCase(),dec=sel.value;
+    const rows=(j.events||[]).filter(e=>{
+      if(dec!=="all"&&e.Decision!==dec)return false;
+      if(!f)return true;
+      const name=(agentsById[e.AgentID]||{}).Name||"";
+      return [e.Event,name,e.Verb,e.Resource,e.WritID,e.Reason,e.Decision].join(" ").toLowerCase().includes(f);
+    }).map(e=>{
+      const name=(agentsById[e.AgentID]||{}).Name||(e.AgentID?e.AgentID.slice(0,8):"");
+      const d=e.Decision?pill(e.Decision,e.Decision==="ALLOW"?"allow":"deny"):el("span","faint","—");
+      const vr=el("span","mono",e.Verb?e.Verb+":"+e.Resource:"");
+      return [el("span","mono dim",ts(e.At)),el("span","mono",e.Event),name,d,vr,
+              el("span","mono faint",e.WritID?e.WritID.slice(0,14)+"…":""),el("span","dim",e.Reason||"")];
+    });
+    holder.replaceChildren(renderTable(["at","event","agent","decision","action","writ","detail"],rows));
+  }
+  q.oninput=refresh; sel.onchange=refresh;
+  await refresh();
+  pollT=setInterval(()=>{if(VIEW==="timeline")refresh().catch(()=>{})},4000);
+}
+
+async function vAgents(root){
+  const agents=await loadAgents();
+  const rows=agents.map(a=>{
+    const st=effState(a);
+    return [el("span","mono",a.Name),pill(st,st),a.Owner,
+            a.SpawnedBy||el("span","faint","—"),
+            a.ExpiresAt?el("span","mono dim",ts(a.ExpiresAt)):el("span","faint","—"),
+            el("span","dim",a.Purpose)];
+  });
+  root.appendChild(renderTable(["name","state","owner","spawned by","expires","purpose"],rows));
+}
+
+async function vWrits(root){
+  await loadAgents();
+  const j=await api("/v1/writs");
+  for(const w of (j.writs||[])){
+    const head=el("div","bar");
+    const st=w.State==="active"?pill("active","active"):pill(w.State,"revoked");
+    head.append(el("span","mono",w.ID),st,el("span","dim","for "+w.ForPrincipal),
+                el("span","faint mono","exp "+ts(w.Exp)));
+    root.appendChild(head);
+    try{
+      const t=await api("/v1/writs/"+encodeURIComponent(w.ID));
+      const tree=el("div","tree");
+      const kids={};
+      (t.blocks||[]).forEach(b=>{const p=b.parent_id||"";(kids[p]=kids[p]||[]).push(b)});
+      const draw=(pid,prefix)=>{
+        (kids[pid]||[]).forEach((b,i,arr)=>{
+          const last=i===arr.length-1;
+          const line=el("div");
+          line.appendChild(el("span","arm",prefix+(pid===""?"":(last?"└─ ":"├─ "))));
+          const name=b.to_agent.split("/agent/")[1]||b.to_agent;
+          const lbl=el("span",b.revoked_at?"rev":null,name);
+          line.appendChild(lbl);
+          line.appendChild(el("span","arm","  · depth "+b.depth+" · exp "+ts(b.exp)+(b.revoked_at?" · REVOKED":"")));
+          tree.appendChild(line);
+          draw(b.id,prefix+(pid===""?"":(last?"   ":"│  ")));
+        });
+      };
+      tree.appendChild(el("div","arm","authority: "+w.ForPrincipal));
+      draw("", "");
+      root.appendChild(tree);
+    }catch(e){root.appendChild(el("div","err","tree: "+e.message))}
+  }
+  if(!(j.writs||[]).length)root.appendChild(el("div","empty","no writs yet — grant one with the CLI"));
+}
+
+async function vTemplates(root){
+  const j=await api("/v1/templates");
+  const rows=(j.templates||[]).map(t=>[
+    el("span","mono",t.Name),
+    el("span","mono",(t.MaxCaps||[]).join("  ")),
+    el("span","mono dim",(t.MaxTTL/1e9)+"s"),
+    el("span","mono faint","admin:spawn/"+t.Name),
+    el("span","dim",t.Purpose)]);
+  root.appendChild(renderTable(["template","max capabilities","max ttl","spawn cap","purpose"],rows));
+}
+
+const views={timeline:vTimeline,agents:vAgents,writs:vWrits,templates:vTemplates};
+async function show(v){
+  VIEW=v;clearInterval(pollT);
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+  const root=$("#view");root.replaceChildren();
+  try{await views[v](root)}catch(e){root.appendChild(el("div","err",e.message+" — is the token right?"))}
+}
+
+async function unlock(){
+  TOKEN=$("#tok").value.trim()||TOKEN;
+  try{
+    await api("/v1/agents");            // auth probe
+    sessionStorage.setItem("chancery_token",TOKEN);
+    $("#gate").hidden=true;$("#nav").hidden=false;$("#view").hidden=false;
+    integrity();setInterval(integrity,10000);
+    show("timeline");
+  }catch(e){$("#gateErr").textContent="rejected — check the token (chancery init prints it once)"}
+}
+$("#go").onclick=unlock;
+$("#tok").addEventListener("keydown",e=>{if(e.key==="Enter")unlock()});
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>show(b.dataset.v));
+if(TOKEN){$("#tok").value=TOKEN;unlock()}
+</script>
+</body>
+</html>
