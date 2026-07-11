@@ -8,10 +8,11 @@
   :root{
     --bg:#0d1117; --panel:#151b24; --panel2:#1b2330; --line:#26303e;
     --ink:#dce3ec; --dim:#8494a8; --faint:#5a6a7e;
-    --gold:#d4a843; --allow:#3fb27f; --deny:#e05d5d; --hold:#d4a843;
+    --gold:#d4a843; --allow:#3fb27f; --deny:#e05d5d;
     --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box;margin:0}
+  [hidden]{display:none!important}
   body{background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
   header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
   header h1{font-size:17px;font-weight:650;letter-spacing:.4px}
@@ -28,10 +29,9 @@
   input[type=text],input[type=password],select{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:7px 11px;font:inherit;font-size:13px}
   input[type=text]{min-width:260px}
   .btn{background:var(--gold);color:#1a1408;border:none;border-radius:7px;padding:7px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
-  .btn.ghost{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th{color:var(--faint);text-align:left;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.7px;padding:8px 12px;border-bottom:1px solid var(--line)}
-  td{padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
   td:not(:last-child){white-space:nowrap}
   tr:hover td{background:rgba(255,255,255,.02)}
   .mono{font-family:var(--mono);font-size:12px}
@@ -43,12 +43,17 @@
   .p-suspended{background:rgba(212,168,67,.15);color:var(--gold)}
   .p-revoked,.p-retired,.p-expired{background:rgba(224,93,93,.13);color:var(--deny)}
   .p-orphaned{background:rgba(132,148,168,.15);color:var(--dim)}
-  .tree{font-family:var(--mono);font-size:12.5px;line-height:1.9;padding:14px 16px;background:var(--panel);border:1px solid var(--line);border-radius:9px;margin:8px 0 18px}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:99px;margin-right:8px;vertical-align:1px;background:var(--faint)}
+  .dot.grant{background:var(--gold)} .dot.act{background:#5a9bd4} .dot.sec{background:var(--deny)} .dot.life{background:var(--dim)} .dot.ok{background:var(--allow)}
+  .chip{display:inline-block;font-family:var(--mono);font-size:11px;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 7px;margin:1px 3px 1px 0;color:var(--dim)}
+  .when{color:var(--dim);cursor:default}
+  .sub2{color:var(--faint);font-size:11.5px}
+  .tree{font-size:13px;line-height:2;padding:14px 18px;background:var(--panel);border:1px solid var(--line);border-radius:9px;margin:8px 0 20px}
+  .tree .node{font-weight:600}
   .tree .rev{color:var(--deny);text-decoration:line-through}
-  .tree .arm{color:var(--faint)}
+  .tree .arm{color:var(--faint);font-family:var(--mono)}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-bottom:18px}
   #gate{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:70vh;gap:14px}
-  [hidden]{display:none!important}
   #gate p{color:var(--dim);max-width:440px;text-align:center;font-size:13px}
   .err{color:var(--deny);font-size:13px}
   .empty{color:var(--faint);padding:22px;text-align:center}
@@ -94,8 +99,65 @@ async function api(path){
   return r.json();
 }
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
-function pill(text,kind){const s=el("span","pill p-"+kind,text);return s}
-function ts(v){if(!v)return"";const d=new Date(v);return isNaN(d)?String(v):d.toISOString().replace("T"," ").slice(0,19)}
+function pill(text,kind){return el("span","pill p-"+kind,text)}
+function chip(text){return el("span","chip",text)}
+function shortAgent(uri){return (uri||"").includes("/agent/")?uri.split("/agent/")[1]:uri}
+function person(p){return (p||"").replace(/^user:/,"")}
+function full(v){const d=new Date(v);return isNaN(d)?String(v):d.toLocaleString()}
+// "2m ago" / "in 18m" — full timestamp on hover.
+function rel(v){
+  if(!v)return el("span","faint","—");
+  const d=new Date(v); if(isNaN(d))return el("span","dim",String(v));
+  const s=Math.round((d-Date.now())/1000), a=Math.abs(s);
+  const u=a<60?[a,"s"]:a<3600?[Math.round(a/60),"m"]:a<86400?[Math.round(a/3600),"h"]:[Math.round(a/86400),"d"];
+  const e=el("span","when",(s<0?u[0]+u[1]+" ago":"in "+u[0]+u[1]));
+  e.title=full(v); return e;
+}
+function dur(ns){const s=Math.round(ns/1e9);
+  return s%3600===0?(s/3600)+"h":s%60===0?(s/60)+"m":s+"s"}
+
+// Plain-English event descriptions. {a}=agent name.
+const EVENTS={
+  "writ.grant":       ["grant","Authority granted to {a}"],
+  "writ.delegate":    ["grant","Authority delegated to {a}"],
+  "writ.revoke":      ["sec","Writ revoked"],
+  "writ.revoke_block":["sec","Delegation branch revoked"],
+  "action.check":     ["act","Action checked"],
+  "mcp.call":         ["act","Tool call"],
+  "mcp.net":          ["act","Navigation"],
+  "mcp.list_filtered":["act","Tool list filtered for {a}"],
+  "mcp.wrap_start":   ["life","Enforcement session started for {a}"],
+  "mcp.wrap_refused": ["sec","Session refused for {a}"],
+  "mcp.server_exit":  ["life","Enforcement session ended for {a}"],
+  "mcp.malformed":    ["sec","Malformed frame dropped"],
+  "agent.register":   ["life","Agent registered: {a}"],
+  "agent.version":    ["life","New version of {a}"],
+  "agent.spawn":      ["grant","Agent spawned: {a}"],
+  "agent.spawn_refused":["sec","Spawn refused"],
+  "agent.expired":    ["life","Expired agent retired: {a}"],
+  "agent.suspend":    ["life","Agent suspended: {a}"],
+  "agent.resume":     ["life","Agent resumed: {a}"],
+  "agent.retire":     ["life","Agent retired: {a}"],
+  "agent.revoke":     ["sec","Agent revoked: {a}"],
+  "agent.orphan":     ["life","Agent orphaned: {a}"],
+  "agent.transfer":   ["life","Ownership of {a} transferred"],
+  "agent.allowlist":  ["life","Allow-list updated for {a}"],
+  "agent.unregistered_ref":["sec","Unregistered agent referenced (shadow signal)"],
+  "instance.start":   ["life","Instance started for {a}"],
+  "instance.revoke":  ["sec","Instance revoked"],
+  "template.create":  ["life","Template created"],
+  "api.auth_failed":  ["sec","API auth failed"],
+};
+function friendly(e){
+  const name=shortAgent((agentsById[e.AgentID]||{}).Name)||(agentsById[e.AgentID]||{}).Name||"";
+  const [kind,tpl]=EVENTS[e.Event]||["life",e.Event];
+  const wrap=el("span");
+  const d=el("span","dot "+kind); wrap.appendChild(d);
+  wrap.appendChild(el("span",null,tpl.replace("{a}",name||"agent")));
+  const sub=el("div","sub2 mono",e.Event); wrap.appendChild(sub);
+  return wrap;
+}
+function cleanReason(r){return (r||"").replace(/^\[[a-z]+\] /,"")}
 
 async function integrity(){
   try{
@@ -132,7 +194,7 @@ function renderTable(head,rows){
 
 async function vTimeline(root){
   const bar=el("div","bar");
-  const q=el("input");q.type="text";q.placeholder="filter (agent, event, tool, writ…)";q.id="q";
+  const q=el("input");q.type="text";q.placeholder="filter (agent, event, tool, writ…)";
   const sel=el("select");["all","ALLOW","DENY"].forEach(o=>{const op=el("option",null,o);op.value=o;sel.appendChild(op)});
   bar.append(q,sel);root.appendChild(bar);
   const holder=el("div");root.appendChild(holder);
@@ -146,13 +208,13 @@ async function vTimeline(root){
       const name=(agentsById[e.AgentID]||{}).Name||"";
       return [e.Event,name,e.Verb,e.Resource,e.WritID,e.Reason,e.Decision].join(" ").toLowerCase().includes(f);
     }).map(e=>{
-      const name=(agentsById[e.AgentID]||{}).Name||(e.AgentID?e.AgentID.slice(0,8):"");
-      const d=e.Decision?pill(e.Decision,e.Decision==="ALLOW"?"allow":"deny"):el("span","faint","—");
-      const vr=el("span","mono",e.Verb?e.Verb+":"+e.Resource:"");
-      return [el("span","mono dim",ts(e.At)),el("span","mono",e.Event),name,d,vr,
-              el("span","mono faint",e.WritID?e.WritID.slice(0,14)+"…":""),el("span","dim",e.Reason||"")];
+      const d=e.Decision?pill(e.Decision,e.Decision==="ALLOW"?"allow":"deny"):el("span","faint","");
+      const act=e.Resource?chip((e.Verb&&e.Verb!=="call"?e.Verb+" ":"")+e.Resource):el("span","faint","");
+      const detail=el("span","dim",cleanReason(e.Reason));
+      if(e.WritID){detail.title="writ "+e.WritID}
+      return [rel(e.At),friendly(e),d,act,detail];
     });
-    holder.replaceChildren(renderTable(["at","event","agent","decision","action","writ","detail"],rows));
+    holder.replaceChildren(renderTable(["when","what happened","decision","action","detail"],rows));
   }
   q.oninput=refresh; sel.onchange=refresh;
   await refresh();
@@ -163,12 +225,12 @@ async function vAgents(root){
   const agents=await loadAgents();
   const rows=agents.map(a=>{
     const st=effState(a);
-    return [el("span","mono",a.Name),pill(st,st),a.Owner,
-            a.SpawnedBy||el("span","faint","—"),
-            a.ExpiresAt?el("span","mono dim",ts(a.ExpiresAt)):el("span","faint","—"),
+    return [el("span","mono",a.Name),pill(st,st),person(a.Owner),
+            a.SpawnedBy?el("span",null,"spawned by "+a.SpawnedBy):el("span","faint","—"),
+            a.ExpiresAt?rel(a.ExpiresAt):el("span","faint","—"),
             el("span","dim",a.Purpose)];
   });
-  root.appendChild(renderTable(["name","state","owner","spawned by","expires","purpose"],rows));
+  root.appendChild(renderTable(["name","state","owner","origin","expires","purpose"],rows));
 }
 
 async function vWrits(root){
@@ -177,8 +239,10 @@ async function vWrits(root){
   for(const w of (j.writs||[])){
     const head=el("div","bar");
     const st=w.State==="active"?pill("active","active"):pill(w.State,"revoked");
-    head.append(el("span","mono",w.ID),st,el("span","dim","for "+w.ForPrincipal),
-                el("span","faint mono","exp "+ts(w.Exp)));
+    const title=el("span",null,"On the authority of ");
+    title.appendChild(el("b",null,person(w.ForPrincipal)));
+    head.append(st,title,rel(w.Exp));
+    const idEl=el("span","sub2 mono",w.ID); head.appendChild(idEl);
     root.appendChild(head);
     try{
       const t=await api("/v1/writs/"+encodeURIComponent(w.ID));
@@ -190,15 +254,16 @@ async function vWrits(root){
           const last=i===arr.length-1;
           const line=el("div");
           line.appendChild(el("span","arm",prefix+(pid===""?"":(last?"└─ ":"├─ "))));
-          const name=b.to_agent.split("/agent/")[1]||b.to_agent;
-          const lbl=el("span",b.revoked_at?"rev":null,name);
-          line.appendChild(lbl);
-          line.appendChild(el("span","arm","  · depth "+b.depth+" · exp "+ts(b.exp)+(b.revoked_at?" · REVOKED":"")));
+          line.appendChild(el("span","node"+(b.revoked_at?" rev":""),shortAgent(b.to_agent)));
+          line.appendChild(el("span","faint","  may: "));
+          (b.caps&&b.caps.length?b.caps:["(everything the parent may)"]).forEach(c=>line.appendChild(chip(c)));
+          const meta=el("span","faint","· ");
+          line.appendChild(meta); line.appendChild(rel(b.exp));
+          if(b.revoked_at)line.appendChild(el("span"," pill p-revoked","REVOKED"));
           tree.appendChild(line);
-          draw(b.id,prefix+(pid===""?"":(last?"   ":"│  ")));
+          draw(b.id,prefix+(pid===""?"":(last?"    ":"│   ")));
         });
       };
-      tree.appendChild(el("div","arm","authority: "+w.ForPrincipal));
       draw("", "");
       root.appendChild(tree);
     }catch(e){root.appendChild(el("div","err","tree: "+e.message))}
@@ -208,13 +273,12 @@ async function vWrits(root){
 
 async function vTemplates(root){
   const j=await api("/v1/templates");
-  const rows=(j.templates||[]).map(t=>[
-    el("span","mono",t.Name),
-    el("span","mono",(t.MaxCaps||[]).join("  ")),
-    el("span","mono dim",(t.MaxTTL/1e9)+"s"),
-    el("span","mono faint","admin:spawn/"+t.Name),
-    el("span","dim",t.Purpose)]);
-  root.appendChild(renderTable(["template","max capabilities","max ttl","spawn cap","purpose"],rows));
+  const rows=(j.templates||[]).map(t=>{
+    const caps=el("span");(t.MaxCaps||[]).forEach(c=>caps.appendChild(chip(c)));
+    return [el("span","mono",t.Name),caps,dur(t.MaxTTL),
+      chip("admin:spawn/"+t.Name),el("span","dim",t.Purpose)];
+  });
+  root.appendChild(renderTable(["template","spawned agents may at most","max lifetime","required spawn cap","purpose"],rows));
 }
 
 const views={timeline:vTimeline,agents:vAgents,writs:vWrits,templates:vTemplates};

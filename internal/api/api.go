@@ -6,6 +6,7 @@ package api
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -409,11 +410,30 @@ func (s *Server) getWrit(w http.ResponseWriter, r *http.Request) {
 		ToAgent   string     `json:"to_agent"`
 		Exp       time.Time  `json:"exp"`
 		RevokedAt *time.Time `json:"revoked_at"`
+		// Caps: block 0's grant or a delegation block's caveats, as
+		// display strings — decoded (not verified; display only) from
+		// the block payload so the tree can show what each principal
+		// may do.
+		Caps []string `json:"caps"`
 	}
 	out := make([]uiBlock, 0, len(blocks))
 	for _, b := range blocks {
-		out = append(out, uiBlock{ID: b.ID, ParentID: b.ParentID, Depth: b.Depth,
-			ToAgent: b.ToAgent, Exp: b.Exp, RevokedAt: b.RevokedAt})
+		ub := uiBlock{ID: b.ID, ParentID: b.ParentID, Depth: b.Depth,
+			ToAgent: b.ToAgent, Exp: b.Exp, RevokedAt: b.RevokedAt}
+		if parts := strings.Split(b.JWS, "."); len(parts) == 3 {
+			if payload, err := base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
+				var body struct {
+					Cap    []policy.Cap `json:"cap"`
+					Caveat []policy.Cap `json:"caveat"`
+				}
+				if json.Unmarshal(payload, &body) == nil {
+					for _, c := range append(body.Cap, body.Caveat...) {
+						ub.Caps = append(ub.Caps, c.String())
+					}
+				}
+			}
+		}
+		out = append(out, ub)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"writ": meta, "blocks": out})
 }
