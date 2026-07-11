@@ -6,87 +6,161 @@
 <title>Chancery</title>
 <style>
   :root{
-    --bg:#0d1117; --panel:#151b24; --panel2:#1b2330; --line:#26303e;
-    --ink:#dce3ec; --dim:#8494a8; --faint:#5a6a7e;
-    --gold:#d4a843; --allow:#3fb27f; --deny:#e05d5d;
-    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    --bg:#0d0e12; --panel:#16171c; --panel2:#1e1f24; --panel3:#26272d;
+    --line:#26272d; --line2:#33343b;
+    --ink:#e3e2e7; --dim:#918fa0; --faint:#63626e;
+    --seal:#5e5ce6; --seal-ink:#c2c1ff;
+    --allow:#34d399; --deny:#f87171; --warn:#fbbf24;
+    --sans:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,Menlo,Consolas,monospace;
   }
   *{box-sizing:border-box;margin:0}
   [hidden]{display:none!important}
-  body{background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-  header{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
-  header h1{font-size:17px;font-weight:650;letter-spacing:.4px}
-  header h1 .c{color:var(--gold)}
-  header .sub{color:var(--faint);font-size:12px}
-  #integrity{margin-left:auto;font-size:12px;padding:4px 12px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
-  #integrity.ok{color:var(--allow);border-color:rgba(63,178,127,.4)}
-  #integrity.bad{color:var(--deny);border-color:rgba(224,93,93,.5);font-weight:600}
-  nav{display:flex;gap:2px;padding:10px 22px 0;border-bottom:1px solid var(--line)}
-  nav button{background:none;border:none;color:var(--dim);font:inherit;font-size:13px;padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent}
-  nav button.on{color:var(--ink);border-bottom-color:var(--gold)}
-  main{padding:18px 22px;max-width:1200px}
+  html{background:var(--bg)}
+  body{background:var(--bg);color:var(--ink);font:14px/1.55 var(--sans)}
+  ::selection{background:rgba(94,92,230,.35)}
+
+  /* ---- top bar ---- */
+  header{display:flex;align-items:center;gap:26px;padding:0 32px;height:56px;
+    border-bottom:1px solid var(--line);background:var(--bg);position:sticky;top:0;z-index:5}
+  .brand{font-size:15px;font-weight:700;letter-spacing:.12em;white-space:nowrap}
+  .brand .c{color:var(--seal-ink)}
+  nav{display:flex;gap:4px;height:100%}
+  nav button{background:none;border:none;color:var(--dim);font:inherit;font-size:13px;
+    padding:0 14px;cursor:pointer;border-bottom:2px solid transparent;border-top:2px solid transparent;height:100%}
+  nav button:hover{color:var(--ink)}
+  nav button.on{color:var(--ink);border-bottom-color:var(--seal)}
+  #integrity{margin-left:auto;font-family:var(--mono);font-size:11px;letter-spacing:.06em;
+    padding:5px 14px;border-radius:99px;border:1px solid var(--line2);color:var(--dim);white-space:nowrap}
+  #integrity.ok{color:var(--allow);border-color:rgba(52,211,153,.35)}
+  #integrity.bad{color:var(--deny);border-color:rgba(248,113,113,.55);font-weight:700}
+
+  main{padding:28px 32px 40px;max-width:1360px;margin:0 auto}
+
+  /* ---- page heading ---- */
+  .eyebrow{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--seal-ink);margin-bottom:8px}
+  .eyebrow .ed{display:inline-block;width:6px;height:6px;border-radius:99px;background:var(--seal);margin-right:8px;vertical-align:1px}
+  h1.page{font-size:24px;font-weight:600;letter-spacing:-.02em;line-height:32px}
+  .pagedesc{color:var(--dim);font-size:13.5px;max-width:640px;margin-top:6px}
+  .pagehead{margin-bottom:22px}
+
+  /* ---- stat cards ---- */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:22px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px 18px 14px}
+  .stat .k{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+  .stat .v{font-size:24px;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .stat .v .u{font-size:13px;color:var(--dim);font-weight:400;margin-left:4px}
+  .stat .track{height:3px;border-radius:99px;background:var(--panel3);margin-top:12px;overflow:hidden}
+  .stat .fill{height:100%;border-radius:99px;background:var(--seal-ink)}
+  .stat .fill.g{background:var(--allow)} .stat .fill.r{background:var(--deny)}
+
+  /* ---- controls ---- */
   .bar{display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap}
-  input[type=text],input[type=password],select{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:7px 11px;font:inherit;font-size:13px}
-  input[type=text]{min-width:260px}
-  .btn{background:var(--gold);color:#1a1408;border:none;border-radius:7px;padding:7px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+  input[type=text],input[type=password],select{background:var(--panel);border:1px solid var(--line2);
+    color:var(--ink);border-radius:4px;padding:7px 12px;font-family:var(--mono);font-size:12.5px}
+  input::placeholder{color:var(--faint)}
+  input[type=text]{min-width:280px}
+  input:focus,select:focus{outline:none;border-color:var(--seal)}
+  .btn{background:var(--seal);color:#fff;border:none;border-radius:4px;padding:8px 18px;
+    font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+  .btn:hover{background:#6d6bf0}
+
+  /* ---- ledger tables ---- */
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:6px;overflow:hidden;margin-bottom:18px}
   table{width:100%;border-collapse:collapse;font-size:13px}
-  th{color:var(--faint);text-align:left;font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.7px;padding:8px 12px;border-bottom:1px solid var(--line)}
-  td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{font-family:var(--mono);color:var(--dim);text-align:left;font-weight:500;font-size:10.5px;
+    text-transform:uppercase;letter-spacing:.14em;padding:11px 16px;
+    border-bottom:1px solid var(--line2);background:var(--panel2)}
+  td{padding:11px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
   td:not(:last-child){white-space:nowrap}
-  tr:hover td{background:rgba(255,255,255,.02)}
+  tbody tr:hover td{background:#1a1b20}
   .mono{font-family:var(--mono);font-size:12px}
   .dim{color:var(--dim)} .faint{color:var(--faint)}
-  .pill{display:inline-block;padding:1px 9px;border-radius:99px;font-size:11px;font-weight:600;letter-spacing:.3px}
-  .p-allow{background:rgba(63,178,127,.13);color:var(--allow)}
-  .p-deny{background:rgba(224,93,93,.13);color:var(--deny)}
-  .p-active{background:rgba(63,178,127,.13);color:var(--allow)}
-  .p-suspended{background:rgba(212,168,67,.15);color:var(--gold)}
-  .p-revoked,.p-retired,.p-expired{background:rgba(224,93,93,.13);color:var(--deny)}
-  .p-orphaned{background:rgba(132,148,168,.15);color:var(--dim)}
-  .dot{display:inline-block;width:7px;height:7px;border-radius:99px;margin-right:8px;vertical-align:1px;background:var(--faint)}
-  .dot.grant{background:var(--gold)} .dot.act{background:#5a9bd4} .dot.sec{background:var(--deny)} .dot.life{background:var(--dim)} .dot.ok{background:var(--allow)}
-  .chip{display:inline-block;font-family:var(--mono);font-size:11px;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 7px;margin:1px 3px 1px 0;color:var(--dim)}
-  .when{color:var(--dim);cursor:default}
-  .sub2{color:var(--faint);font-size:11.5px}
-  .tree{font-size:13px;line-height:2;padding:14px 18px;background:var(--panel);border:1px solid var(--line);border-radius:9px;margin:8px 0 20px}
-  .tree .node{font-weight:600}
-  .tree .rev{color:var(--deny);text-decoration:line-through}
-  .tree .arm{color:var(--faint);font-family:var(--mono)}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-bottom:18px}
-  #gate{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:70vh;gap:14px}
-  #gate p{color:var(--dim);max-width:440px;text-align:center;font-size:13px}
-  .err{color:var(--deny);font-size:13px}
-  .empty{color:var(--faint);padding:22px;text-align:center}
-  footer{color:var(--faint);font-size:11.5px;padding:8px 22px 24px}
+
+  /* ---- badges, chips, dots ---- */
+  .pill{display:inline-block;font-family:var(--mono);padding:2px 10px;border-radius:2px;
+    font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+  .p-allow,.p-active{background:rgba(52,211,153,.12);color:var(--allow);border:1px solid rgba(52,211,153,.3)}
+  .p-deny,.p-revoked,.p-retired{background:rgba(248,113,113,.12);color:var(--deny);border:1px solid rgba(248,113,113,.3)}
+  .p-suspended,.p-expired{background:rgba(251,191,36,.1);color:var(--warn);border:1px solid rgba(251,191,36,.28)}
+  .p-orphaned{background:rgba(145,143,160,.1);color:var(--dim);border:1px solid var(--line2)}
+  .chip{display:inline-block;font-family:var(--mono);font-size:11px;background:var(--panel2);
+    border:1px solid var(--line2);border-radius:2px;padding:2px 8px;margin:1px 4px 1px 0;color:var(--seal-ink)}
+  .chip.dimc{color:var(--dim)}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:99px;margin-right:9px;vertical-align:1px;background:var(--faint)}
+  .dot.grant{background:var(--seal-ink)} .dot.act{background:#60a5fa} .dot.sec{background:var(--deny)}
+  .dot.life{background:var(--dim)} .dot.ok{background:var(--allow)}
+  .when{color:var(--dim);cursor:default;font-variant-numeric:tabular-nums}
+  .sub2{color:var(--faint);font-size:11px;letter-spacing:.02em}
+
+  /* ---- writ cards + delegation tree ---- */
+  .writgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:16px}
+  .writcard{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:18px 20px}
+  .writcard .wid{font-family:var(--mono);font-size:11.5px;letter-spacing:.05em;color:var(--seal-ink)}
+  .writcard .whead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
+  .writcard h3{font-size:16px;font-weight:600;letter-spacing:-.01em;margin:2px 0 14px}
+  .wfields{display:grid;grid-template-columns:1fr 1fr;gap:12px;border-top:1px solid var(--line);
+    border-bottom:1px solid var(--line);padding:12px 0;margin-bottom:14px}
+  .wfields .k{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+  .wfields .v{font-size:13px}
+  .tree{font-size:12.5px}
+  .tnode{position:relative;margin-left:18px;padding-left:16px;border-left:1px solid var(--line2)}
+  .tnode.root{margin-left:0;padding-left:0;border-left:none}
+  .tnode::before{content:"";position:absolute;left:0;top:16px;width:12px;height:1px;background:var(--line2)}
+  .tnode.root::before{display:none}
+  .nbox{display:inline-block;background:var(--panel2);border:1px solid var(--line2);border-radius:4px;
+    padding:7px 12px;margin:5px 0}
+  .nbox .nname{font-family:var(--mono);font-size:12px;font-weight:600}
+  .nbox .nname.rev{color:var(--deny);text-decoration:line-through}
+  .nbox .nmeta{margin-top:3px}
+
+  /* ---- gate ---- */
+  #gate{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:72vh;gap:0}
+  .gatecard{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:36px 40px;
+    display:flex;flex-direction:column;align-items:center;gap:16px;max-width:460px}
+  .gatecard .brand{font-size:20px}
+  .gatecard p{color:var(--dim);text-align:center;font-size:13px}
+  .err{color:var(--deny);font-size:12.5px;font-family:var(--mono)}
+  .empty{color:var(--faint);padding:26px;text-align:center;font-size:13px}
+  footer{color:var(--faint);font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+    text-transform:uppercase;padding:18px 32px 28px;border-top:1px solid var(--line);
+    display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 </style>
 </head>
 <body>
 <header>
-  <h1><span class="c">⚖</span> Chancery</h1>
-  <span class="sub">read-only · the control plane is the CLI/API</span>
-  <span id="integrity">integrity: checking…</span>
+  <span class="brand">CHANCERY <span class="c">⚖</span></span>
+  <nav id="nav" hidden>
+    <button data-v="timeline" class="on">Audit</button>
+    <button data-v="agents">Agents</button>
+    <button data-v="writs">Writs</button>
+    <button data-v="templates">Templates</button>
+  </nav>
+  <span id="integrity">INTEGRITY: CHECKING…</span>
 </header>
-<nav id="nav" hidden>
-  <button data-v="timeline" class="on">Timeline</button>
-  <button data-v="agents">Agents</button>
-  <button data-v="writs">Writs</button>
-  <button data-v="templates">Templates</button>
-</nav>
 <main>
   <div id="gate">
-    <h1 style="font-size:20px"><span style="color:var(--gold)">⚖</span> Chancery</h1>
-    <p>Paste the admin token printed by <span class="mono">chancery init</span>.
-       It is kept in this tab's session storage only and used for read-only
-       <span class="mono">/v1</span> calls.</p>
-    <div class="bar">
-      <input type="password" id="tok" placeholder="chy_…" size="42">
-      <button class="btn" id="go">View</button>
+    <div class="gatecard">
+      <span class="brand">CHANCERY <span class="c">⚖</span></span>
+      <p>Paste the admin token printed by <span class="mono">chancery init</span>.
+         It is kept in this tab's session storage only and used for read-only
+         <span class="mono">/v1</span> calls.</p>
+      <div class="bar">
+        <input type="password" id="tok" placeholder="chy_…" size="34">
+        <button class="btn" id="go">Unlock</button>
+      </div>
+      <div class="err" id="gateErr"></div>
     </div>
-    <div class="err" id="gateErr"></div>
   </div>
   <div id="view" hidden></div>
 </main>
-<footer>Every row above is hash-chained; <span class="mono">chancery audit verify</span> proves it. Writes (grant, revoke, seal) happen in the CLI — by design (RFC-014).</footer>
+<footer>
+  <span>Writes happen in the CLI by design · RFC-014</span>
+  <span>Every row is hash-chained — <span style="text-transform:none">chancery audit verify</span> proves it</span>
+</footer>
 <script>
 "use strict";
 const $=s=>document.querySelector(s);
@@ -100,7 +174,7 @@ async function api(path){
 }
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e}
 function pill(text,kind){return el("span","pill p-"+kind,text)}
-function chip(text){return el("span","chip",text)}
+function chip(text,dim){return el("span","chip"+(dim?" dimc":""),text)}
 function shortAgent(uri){return (uri||"").includes("/agent/")?uri.split("/agent/")[1]:uri}
 function person(p){return (p||"").replace(/^user:/,"")}
 function full(v){const d=new Date(v);return isNaN(d)?String(v):d.toLocaleString()}
@@ -113,8 +187,38 @@ function rel(v){
   const e=el("span","when",(s<0?u[0]+u[1]+" ago":"in "+u[0]+u[1]));
   e.title=full(v); return e;
 }
+function relText(v){
+  if(!v)return "—";
+  const d=new Date(v); if(isNaN(d))return String(v);
+  const s=Math.round((d-Date.now())/1000), a=Math.abs(s);
+  const u=a<60?[a,"s"]:a<3600?[Math.round(a/60),"m"]:a<86400?[Math.round(a/3600),"h"]:[Math.round(a/86400),"d"];
+  return s<0?u[0]+u[1]+" ago":"in "+u[0]+u[1];
+}
 function dur(ns){const s=Math.round(ns/1e9);
   return s%3600===0?(s/3600)+"h":s%60===0?(s/60)+"m":s+"s"}
+
+// Page heading: eyebrow + title + description.
+function pagehead(root,eyebrow,title,desc){
+  const h=el("div","pagehead");
+  const e=el("div","eyebrow");e.appendChild(el("span","ed"));e.appendChild(document.createTextNode(eyebrow));
+  h.appendChild(e);
+  h.appendChild(el("h1","page",title));
+  if(desc)h.appendChild(el("div","pagedesc",desc));
+  root.appendChild(h);
+}
+// Stat card: label, value, optional [fraction, colorClass] accent bar.
+function stat(label,value,frac,color){
+  const s=el("div","stat");
+  s.appendChild(el("div","k",label));
+  const v=el("div","v");(value instanceof Node)?v.appendChild(value):v.textContent=value;
+  s.appendChild(v);
+  if(frac!==undefined){
+    const t=el("div","track"),f=el("div","fill"+(color?" "+color:""));
+    f.style.width=Math.max(2,Math.min(100,Math.round(frac*100)))+"%";
+    t.appendChild(f);s.appendChild(t);
+  }
+  return s;
+}
 
 // Plain-English event descriptions. {a}=agent name.
 const EVENTS={
@@ -163,7 +267,7 @@ async function integrity(){
   try{
     const j=await api("/v1/audit/verify");
     const b=$("#integrity");
-    if(j.intact){b.className="ok";b.textContent="integrity: verified ✓ ("+j.verified+" events)"}
+    if(j.intact){b.className="ok";b.textContent="INTEGRITY: VERIFIED ✓ ("+j.verified+" EVENTS)"}
     else{b.className="bad";b.textContent="⚠ INTEGRITY FAILURE — "+(j.error||"chain broken")}
   }catch(e){}
 }
@@ -193,6 +297,9 @@ function renderTable(head,rows){
 }
 
 async function vTimeline(root){
+  pagehead(root,"SYSTEM LOG STREAM","Audit Timeline",
+    "Every agent action, decision, and lifecycle change — hash-chained, metadata-only. Prompts and payloads are never stored.");
+  const statsRow=el("div","stats");root.appendChild(statsRow);
   const bar=el("div","bar");
   const q=el("input");q.type="text";q.placeholder="filter (agent, event, tool, writ…)";
   const sel=el("select");["all","ALLOW","DENY"].forEach(o=>{const op=el("option",null,o);op.value=o;sel.appendChild(op)});
@@ -201,20 +308,28 @@ async function vTimeline(root){
   async function refresh(){
     await loadAgents();
     const j=await api("/v1/audit?limit=200");
+    const all=j.events||[];
+    const allow=all.filter(e=>e.Decision==="ALLOW").length;
+    const deny=all.filter(e=>e.Decision==="DENY").length;
+    statsRow.replaceChildren(
+      stat("EVENTS SHOWN",String(all.length)),
+      stat("ALLOWED",String(allow),(allow+deny)?allow/(allow+deny):0,"g"),
+      stat("DENIED",String(deny),(allow+deny)?deny/(allow+deny):0,"r"),
+      stat("LAST EVENT",all.length?relText(all[0].At):"—"));
     const f=q.value.toLowerCase(),dec=sel.value;
-    const rows=(j.events||[]).filter(e=>{
+    const rows=all.filter(e=>{
       if(dec!=="all"&&e.Decision!==dec)return false;
       if(!f)return true;
       const name=(agentsById[e.AgentID]||{}).Name||"";
       return [e.Event,name,e.Verb,e.Resource,e.WritID,e.Reason,e.Decision].join(" ").toLowerCase().includes(f);
     }).map(e=>{
       const d=e.Decision?pill(e.Decision,e.Decision==="ALLOW"?"allow":"deny"):el("span","faint","");
-      const act=e.Resource?chip((e.Verb&&e.Verb!=="call"?e.Verb+" ":"")+e.Resource):el("span","faint","");
+      const act=e.Resource?chip((e.Verb&&e.Verb!=="call"?e.Verb+" ":"")+e.Resource,true):el("span","faint","");
       const detail=el("span","dim",cleanReason(e.Reason));
       if(e.WritID){detail.title="writ "+e.WritID}
       return [rel(e.At),friendly(e),d,act,detail];
     });
-    holder.replaceChildren(renderTable(["when","what happened","decision","action","detail"],rows));
+    holder.replaceChildren(renderTable(["timestamp","event","decision","action","detail"],rows));
   }
   q.oninput=refresh; sel.onchange=refresh;
   await refresh();
@@ -222,63 +337,99 @@ async function vTimeline(root){
 }
 
 async function vAgents(root){
+  pagehead(root,"IDENTITY REGISTRY","Agent Ledger",
+    "Every autonomous entity in this trust domain — its owner, lineage, and current status.");
   const agents=await loadAgents();
+  const states=agents.map(effState);
+  const active=states.filter(s=>s==="active").length;
+  const spawned=agents.filter(a=>a.SpawnedBy).length;
+  const owners=new Set(agents.map(a=>a.Owner)).size;
+  root.appendChild((()=>{const s=el("div","stats");s.append(
+    stat("ACTIVE AGENTS",String(active),agents.length?active/agents.length:0),
+    stat("TOTAL REGISTERED",String(agents.length)),
+    stat("RUNTIME-SPAWNED",String(spawned),agents.length?spawned/agents.length:0),
+    stat("HUMAN OWNERS",String(owners)));return s})());
   const rows=agents.map(a=>{
     const st=effState(a);
-    return [el("span","mono",a.Name),pill(st,st),person(a.Owner),
-            a.SpawnedBy?el("span",null,"spawned by "+a.SpawnedBy):el("span","faint","—"),
+    return [el("span","mono",a.Name),pill(st,st),el("span","mono",person(a.Owner)),
+            a.SpawnedBy?el("span","dim","spawned by "+a.SpawnedBy):el("span","faint","— root —"),
             a.ExpiresAt?rel(a.ExpiresAt):el("span","faint","—"),
             el("span","dim",a.Purpose)];
   });
-  root.appendChild(renderTable(["name","state","owner","origin","expires","purpose"],rows));
+  root.appendChild(renderTable(["agent name","status","owner","origin","expires","purpose"],rows));
 }
 
 async function vWrits(root){
+  pagehead(root,"ARCHIVE VAULT","Writs of Authority",
+    "Signed grant chains. Each delegation can only narrow — the block format has no field for widening.");
   await loadAgents();
   const j=await api("/v1/writs");
-  for(const w of (j.writs||[])){
-    const head=el("div","bar");
-    const st=w.State==="active"?pill("active","active"):pill(w.State,"revoked");
-    const title=el("span",null,"On the authority of ");
-    title.appendChild(el("b",null,person(w.ForPrincipal)));
-    head.append(st,title,rel(w.Exp));
-    const idEl=el("span","sub2 mono",w.ID); head.appendChild(idEl);
-    root.appendChild(head);
+  const writs=j.writs||[];
+  const active=writs.filter(w=>w.State==="active").length;
+  root.appendChild((()=>{const s=el("div","stats");s.append(
+    stat("ACTIVE WRITS",String(active),writs.length?active/writs.length:0,"g"),
+    stat("TOTAL ISSUED",String(writs.length)),
+    stat("REVOKED",String(writs.length-active),writs.length?(writs.length-active)/writs.length:0,"r"));
+    return s})());
+  const grid=el("div","writgrid");root.appendChild(grid);
+  for(const w of writs){
+    const card=el("div","writcard");
+    const head=el("div","whead");
+    head.appendChild(el("span","wid","WRIT "+w.ID));
+    head.appendChild(w.State==="active"?pill("active","active"):pill(w.State,"revoked"));
+    card.appendChild(head);
+    card.appendChild(el("h3",null,"On the authority of "+person(w.ForPrincipal)));
+    const flds=el("div","wfields");
+    const f1=el("div");f1.appendChild(el("div","k","HUMAN OWNER"));f1.appendChild(el("div","v mono",person(w.ForPrincipal)));
+    const f2=el("div");f2.appendChild(el("div","k","EXPIRES"));
+    const v2=el("div","v");v2.appendChild(rel(w.Exp));f2.appendChild(v2);
+    flds.append(f1,f2);card.appendChild(flds);
     try{
       const t=await api("/v1/writs/"+encodeURIComponent(w.ID));
       const tree=el("div","tree");
       const kids={};
       (t.blocks||[]).forEach(b=>{const p=b.parent_id||"";(kids[p]=kids[p]||[]).push(b)});
-      const draw=(pid,prefix)=>{
-        (kids[pid]||[]).forEach((b,i,arr)=>{
-          const last=i===arr.length-1;
-          const line=el("div");
-          line.appendChild(el("span","arm",prefix+(pid===""?"":(last?"└─ ":"├─ "))));
-          line.appendChild(el("span","node"+(b.revoked_at?" rev":""),shortAgent(b.to_agent)));
-          line.appendChild(el("span","faint","  may: "));
-          (b.caps&&b.caps.length?b.caps:["(everything the parent may)"]).forEach(c=>line.appendChild(chip(c)));
-          const meta=el("span","faint","· ");
-          line.appendChild(meta); line.appendChild(rel(b.exp));
-          if(b.revoked_at)line.appendChild(el("span"," pill p-revoked","REVOKED"));
-          tree.appendChild(line);
-          draw(b.id,prefix+(pid===""?"":(last?"    ":"│   ")));
+      const draw=(pid,parentEl,isRoot)=>{
+        (kids[pid]||[]).forEach(b=>{
+          const node=el("div","tnode"+(isRoot?" root":""));
+          const box=el("div","nbox");
+          box.appendChild(el("div","nname"+(b.revoked_at?" rev":""),shortAgent(b.to_agent)));
+          const meta=el("div","nmeta");
+          meta.appendChild(el("span","faint","may: "));
+          (b.caps&&b.caps.length?b.caps:["(everything the parent may)"]).forEach(c=>meta.appendChild(chip(c)));
+          meta.appendChild(el("span","faint"," · "));
+          meta.appendChild(rel(b.exp));
+          if(b.revoked_at){meta.appendChild(el("span","faint","  "));meta.appendChild(pill("revoked","revoked"))}
+          box.appendChild(meta);
+          node.appendChild(box);
+          parentEl.appendChild(node);
+          draw(b.id,node,false);
         });
       };
-      draw("", "");
-      root.appendChild(tree);
-    }catch(e){root.appendChild(el("div","err","tree: "+e.message))}
+      draw("",tree,true);
+      card.appendChild(tree);
+    }catch(e){card.appendChild(el("div","err","tree: "+e.message))}
+    grid.appendChild(card);
   }
-  if(!(j.writs||[]).length)root.appendChild(el("div","empty","no writs yet — grant one with the CLI"));
+  if(!writs.length)root.appendChild(el("div","empty","no writs yet — grant one with the CLI"));
 }
 
 async function vTemplates(root){
+  pagehead(root,"ADMINISTRATIVE REGISTRY","Spawn Ceilings & Templates",
+    "Human-approved operational limits for runtime-spawned agents: capability caps and maximum lifetimes.");
   const j=await api("/v1/templates");
-  const rows=(j.templates||[]).map(t=>{
+  const ts=j.templates||[];
+  const agents=await loadAgents();
+  const spawned=agents.filter(a=>a.Template).length;
+  root.appendChild((()=>{const s=el("div","stats");s.append(
+    stat("TEMPLATES",String(ts.length)),
+    stat("AGENTS SPAWNED FROM TEMPLATES",String(spawned)));return s})());
+  const rows=ts.map(t=>{
     const caps=el("span");(t.MaxCaps||[]).forEach(c=>caps.appendChild(chip(c)));
     return [el("span","mono",t.Name),caps,dur(t.MaxTTL),
       chip("admin:spawn/"+t.Name),el("span","dim",t.Purpose)];
   });
-  root.appendChild(renderTable(["template","spawned agents may at most","max lifetime","required spawn cap","purpose"],rows));
+  root.appendChild(renderTable(["template","spawned agents may at most","max ttl","required spawn cap","purpose"],rows));
 }
 
 const views={timeline:vTimeline,agents:vAgents,writs:vWrits,templates:vTemplates};
