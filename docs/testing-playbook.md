@@ -145,9 +145,20 @@ printf '%s\n' \
     -- sh -c 'while read l; do echo "{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{}}"; done'
 ```
 
-**Expect:** call 1 forwarded (a `result` comes back); call 2 answered
-by **Chancery itself** with JSON-RPC error `-32001` — it never
-reached the server, because test-runner's block admits only `get_*`.
+**Expect:** two lines, **in either order** — denials are answered
+instantly by the proxy while allowed calls round-trip through the
+server, so the deny usually prints first:
+
+```
+{"error":{"code":-32001,"message":"chancery: denied by writ policy: …"},"id":2,…}
+{"jsonrpc":"2.0","id":0,"result":{}}
+```
+
+The `error` is call 2 (`delete_repo`), answered by **Chancery
+itself** — it never reached the server, because test-runner's block
+admits only `get_*`. The `result` is call 1 forwarded and answered;
+it says `id:0` only because this stub server always replies with id 0
+(a real MCP server echoes the request id).
 (Wrapping as `deploy-bot` would allow both: its grant is the wider
 `call:github/*`. `--agent X` always selects X's *own* block — an
 agent holding no block on the writ is refused at startup.) Note
@@ -353,3 +364,4 @@ rm -rf "$CHANCERY_DATA"
 | `TTL exceeds parent` on delegate | Correct behavior: a child cannot outlive its parent block; pass a shorter `--ttl` |
 | Wrap uses the "wrong" authority after delegation | It doesn't: `--agent X` selects X's **own** block on the writ; agents holding no block are refused loudly |
 | `net` navigation denied that you expected allowed | Host match is exact (`net:github.com/*` ≠ `gist.github.com`); grant the extra host explicitly |
+| Proxy output lines in a "wrong" order, or `result` with `id:0` | Normal: denials are answered immediately by the proxy, allowed calls round-trip through the server; and the playbook's `sh` stub always replies id 0 — match responses by content, not position |
