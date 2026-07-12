@@ -14,6 +14,8 @@ stored.
 Single Go binary. Apache-2.0. MCP-first, then HTTP, shell, browser.
 Try the 60-second story: `make demo`.
 
+![Chancery demo: grant, allow, revoke, deny, tamper-evident audit](demo/chancery-demo.gif)
+
 **MCP-first, not MCP-only.** The registry, writs/delegation, policy,
 sealed credentials, and audit govern *any* agent in any language today
 (LangGraph, CrewAI, a cron job, a shell script) via the decision API —
