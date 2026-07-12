@@ -118,6 +118,10 @@ The audit timeline is hash-chained — `./chancery audit verify` detects
 any edit, deletion, or reorder. Known MVP gaps are published in
 [RFC-009 §5](rfcs/009-threat-model.md).
 
+![Audit timeline: plain-English events, decisions, and a live integrity badge](docs/img/dashboard-audit.png)
+
+![Writs of authority: the delegation tree — each block can only narrow](docs/img/dashboard-writs.png)
+
 ## Guides
 
 - [**Quickstart (MCP)**](QUICKSTART.md) — govern the real filesystem MCP server in 5 minutes
