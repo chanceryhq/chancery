@@ -146,7 +146,13 @@ CREATE TABLE IF NOT EXISTS writs (
 	agent_id TEXT NOT NULL REFERENCES agents(id),
 	state TEXT NOT NULL DEFAULT 'active',
 	max_depth INTEGER NOT NULL, exp TIMESTAMP NOT NULL,
+	task TEXT NOT NULL DEFAULT '',
 	created_at TIMESTAMP NOT NULL, revoked_at TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS server_pins (
+	namespace TEXT PRIMARY KEY,
+	path TEXT NOT NULL, sha256 TEXT NOT NULL,
+	created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
 );
 CREATE TABLE IF NOT EXISTS writ_blocks (
 	id TEXT PRIMARY KEY,
@@ -189,6 +195,7 @@ func Open(path string) (*Store, error) {
 		`ALTER TABLE agents ADD COLUMN spawned_by TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agents ADD COLUMN expires_at TIMESTAMP`,
+		`ALTER TABLE writs ADD COLUMN task TEXT NOT NULL DEFAULT ''`,
 	} {
 		if _, err := db.Exec(ddl); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return nil, fmt.Errorf("migrate: %w", err)
@@ -643,4 +650,40 @@ func (s *Store) CheckIssuable(instanceID string) (*Agent, *Version, *Instance, e
 		return nil, nil, nil, fmt.Errorf("%w: version %d of %s", ErrRevoked, v.Seq, a.Name)
 	}
 	return a, v, in, nil
+}
+
+// --- server pins (RFC-016: callee identity) ---
+
+// ServerPin records what code a wrapped MCP server namespace resolves
+// to. Wrap re-verifies before every spawn and refuses on drift; changing
+// a pin is an explicit, audited operator action (repin).
+type ServerPin struct {
+	Namespace string
+	Path      string
+	SHA256    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (s *Store) GetServerPin(namespace string) (*ServerPin, error) {
+	p := &ServerPin{}
+	err := s.db.QueryRow(`SELECT namespace, path, sha256, created_at, updated_at
+		FROM server_pins WHERE namespace = ?`, namespace).
+		Scan(&p.Namespace, &p.Path, &p.SHA256, &p.CreatedAt, &p.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: server pin %q", ErrNotFound, namespace)
+	}
+	return p, err
+}
+
+// SetServerPin creates or replaces a namespace's pin (first wrap pins;
+// repin updates). The caller audits — pin changes are security events.
+func (s *Store) SetServerPin(namespace, path, sha string) error {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`INSERT INTO server_pins (namespace, path, sha256, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(namespace) DO UPDATE SET path = excluded.path,
+			sha256 = excluded.sha256, updated_at = excluded.updated_at`,
+		namespace, path, sha, now, now)
+	return err
 }

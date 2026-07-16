@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/chanceryhq/chancery/internal/identity"
 	"github.com/chanceryhq/chancery/internal/service"
@@ -343,5 +344,64 @@ func TestDashboardAndWritTree(t *testing.T) {
 	}
 	if code, _ := call(t, ts, "GET", "/v1/writs/w_nope", testToken, nil); code != http.StatusNotFound {
 		t.Errorf("unknown writ = %d, want 404", code)
+	}
+}
+
+// Capability leases over HTTP (RFC-015): a real lease minted by the
+// service verifies over the API; after the writ is revoked, the SAME
+// lease turns invalid — mid-flight revocation fails at the server.
+func TestLeaseVerifyOverHTTP(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "chancery.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	iss, err := identity.LoadOrCreate(dir, "acme.com", "https://chancery.acme.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &service.Service{St: st, Iss: iss}
+	sum := sha256.Sum256([]byte(testToken))
+	ts := httptest.NewServer((&Server{Svc: svc, AdminTokenHash: hex.EncodeToString(sum[:])}).Handler())
+	t.Cleanup(ts.Close)
+
+	if _, _, err := svc.RegisterAgent("lease-bot", "user:a@acme.com", "t", "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	wid, blk, err := svc.GrantWrit("user:a@acme.com", "lease-bot",
+		[]string{"call:stub/*"}, time.Hour, 0, "read metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := svc.MintLease(wid, blk, "lease-bot", "stub/echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code, out := call(t, ts, "POST", "/v1/leases/verify", testToken, map[string]any{"lease": lease})
+	var valid bool
+	json.Unmarshal(out["valid"], &valid)
+	if code != 200 || !valid {
+		t.Fatalf("fresh lease must verify: %d %v", code, out)
+	}
+	if str(out, "resource") != "stub/echo" {
+		t.Errorf("verify must return the leased resource, got %q", str(out, "resource"))
+	}
+
+	if err := st.RevokeWrit(wid); err != nil {
+		t.Fatal(err)
+	}
+	_, out = call(t, ts, "POST", "/v1/leases/verify", testToken, map[string]any{"lease": lease})
+	json.Unmarshal(out["valid"], &valid)
+	if valid {
+		t.Error("lease must die when its writ is revoked")
+	}
+
+	// Garbage in, evaluated out: 200 with valid=false, never a 5xx.
+	code, out = call(t, ts, "POST", "/v1/leases/verify", testToken, map[string]any{"lease": "junk"})
+	json.Unmarshal(out["valid"], &valid)
+	if code != 200 || valid {
+		t.Errorf("garbage lease: want 200+invalid, got %d %v", code, out)
 	}
 }

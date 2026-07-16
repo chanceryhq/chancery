@@ -7,7 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -607,7 +609,7 @@ func tokenCmd() *cobra.Command {
 func writCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "writ", Short: "Manage writs — delegated, attenuating authority (RFC-002)"}
 
-	var forP, toAgent string
+	var forP, toAgent, task string
 	var capStrs []string
 	var ttl time.Duration
 	var maxDepth int
@@ -620,13 +622,16 @@ func writCmd() *cobra.Command {
 				return err
 			}
 			defer e.st.Close()
-			wid, rootBlockID, err := e.svc.GrantWrit(forP, toAgent, capStrs, ttl, maxDepth)
+			wid, rootBlockID, err := e.svc.GrantWrit(forP, toAgent, capStrs, ttl, maxDepth, task)
 			if err != nil {
 				return err
 			}
 			fmt.Printf("writ %s\n  for    %s\n  to     %s\n  block  %s\n  caps   %s\n  expires %s\n",
 				wid, forP, e.iss.SubjectURI(toAgent), rootBlockID,
 				strings.Join(capStrs, ", "), time.Now().UTC().Add(ttl).Format(time.RFC3339))
+			if task != "" {
+				fmt.Printf("  task   %s\n", task)
+			}
 			return nil
 		},
 	}
@@ -635,6 +640,7 @@ func writCmd() *cobra.Command {
 	grant.Flags().StringSliceVar(&capStrs, "cap", nil, "capability verb:resource (repeatable, required)")
 	grant.Flags().DurationVar(&ttl, "ttl", time.Hour, "writ lifetime")
 	grant.Flags().IntVar(&maxDepth, "max-depth", writ.DefaultMaxDepth, "max delegation depth")
+	grant.Flags().StringVar(&task, "task", "", "declared purpose of the grant (RFC-017; handed to intent checkers)")
 	grant.MarkFlagRequired("for")
 	grant.MarkFlagRequired("to")
 	grant.MarkFlagRequired("cap")
@@ -828,6 +834,9 @@ func mcpCmd() *cobra.Command {
 	var agentName, writID, blockID, serverName string
 	var secretMaps, secretFileMaps []string
 	var netGuard bool
+	var intentCheck, intentMode string
+	var intentTimeout time.Duration
+	var lease bool
 	wrap := &cobra.Command{
 		Use:   "wrap --agent <name> --writ <id> -- <server command> [args...]",
 		Short: "Run an MCP server behind Chancery: per-call policy, audit, sealed secrets",
@@ -877,14 +886,41 @@ func mcpCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if serverName == "" {
+				serverName = filepath.Base(args[0])
+			}
+			// Server pinning (RFC-016, T1): the wrap owns the spawn, so it
+			// verifies WHAT it is spawning. First wrap records the
+			// resolved binary's hash; every later wrap re-verifies and
+			// refuses on drift — fail closed, audited. Deliberate
+			// upgrades go through `chancery mcp repin`.
+			binPath, binSHA, err := resolveServerHash(args[0])
+			if err != nil {
+				return fmt.Errorf("cannot hash server binary: %w", err)
+			}
+			if pin, err := e.st.GetServerPin(serverName); err == nil {
+				if pin.SHA256 != binSHA {
+					e.st.Audit(store.AuditEvent{Event: "mcp.server_drift", AgentID: a.ID,
+						WritID: writID, Resource: serverName, Decision: "DENY",
+						Reason: fmt.Sprintf("pinned=%s found=%s path=%s — refuse to start; `chancery mcp repin %s -- <cmd>` after a deliberate upgrade",
+							pin.SHA256[:16], binSHA[:16], binPath, serverName)})
+					return fmt.Errorf("server %q drifted from its pin (pinned %s…, found %s…): refusing to start (fail closed) — after a deliberate upgrade run: chancery mcp repin %s -- %s",
+						serverName, pin.SHA256[:16], binSHA[:16], serverName, strings.Join(args, " "))
+				}
+			} else if errors.Is(err, store.ErrNotFound) {
+				if err := e.st.SetServerPin(serverName, binPath, binSHA); err != nil {
+					return err
+				}
+				e.st.Audit(store.AuditEvent{Event: "mcp.server_pin", AgentID: a.ID,
+					Resource: serverName, Reason: fmt.Sprintf("sha256=%s path=%s", binSHA[:16], binPath)})
+			} else {
+				return err
+			}
 			// The wrapped session is a runtime instance (RFC-001):
 			// `chancery instance revoke` kills it on its next call.
 			inst, err := e.st.CreateInstance(a.ID, v.ID, "declared", "mcp-wrap")
 			if err != nil {
 				return err
-			}
-			if serverName == "" {
-				serverName = filepath.Base(args[0])
 			}
 
 			// Scrubbed child env: baseline + sealed secrets only. The
@@ -1000,6 +1036,31 @@ func mcpCmd() *cobra.Command {
 					return e.svc.Decide(writID, leaf, "net", resource)
 				}
 			}
+			// Intent socket (RFC-017): an external checker gets a veto
+			// after the deterministic layers allow. It receives the
+			// writ's declared task and the call's arguments (transient,
+			// never stored).
+			if intentCheck != "" {
+				if intentMode != "enforce" && intentMode != "advise" {
+					return fmt.Errorf("--intent-mode must be enforce or advise, got %q", intentMode)
+				}
+				wmeta, err := e.st.GetWrit(writID)
+				if err != nil {
+					return err
+				}
+				checker := &mcp.IntentChecker{Cmd: intentCheck, Timeout: intentTimeout,
+					Agent: a.Name, Task: wmeta.Task}
+				p.Intent = checker.Decide
+				p.IntentAdvise = intentMode == "advise"
+			}
+			// Capability leases (RFC-015): stamp each admitted call so a
+			// cooperating server can verify liveness right before the
+			// side effect commits (POST /v1/leases/verify).
+			if lease {
+				p.Lease = func(resource string) (string, error) {
+					return e.svc.MintLease(writID, leaf, a.Name, resource)
+				}
+			}
 			runErr := p.Run()
 			serverIn.Close()
 			waitErr := server.Wait()
@@ -1020,11 +1081,73 @@ func mcpCmd() *cobra.Command {
 		"materialize sealed secret as a 0600 file for the SERVER: NAME=sealed-name; path in env NAME and as chancery-file:NAME in server args (repeatable)")
 	wrap.Flags().BoolVar(&netGuard, "net-guard", false,
 		"force the URL guard on (auto-enabled when the writ grants net:… capabilities)")
+	wrap.Flags().StringVar(&intentCheck, "intent-check", "",
+		"external intent checker: shell command (JSON on stdin) or http(s) URL (RFC-017)")
+	wrap.Flags().StringVar(&intentMode, "intent-mode", "enforce",
+		"intent checker mode: enforce (fail closed) or advise (log only)")
+	wrap.Flags().DurationVar(&intentTimeout, "intent-timeout", time.Second,
+		"per-call budget for the intent checker")
+	wrap.Flags().BoolVar(&lease, "lease", false,
+		"stamp admitted calls with a capability lease in params._meta (RFC-015; cooperating servers verify via POST /v1/leases/verify)")
 	wrap.MarkFlagRequired("agent")
 	wrap.MarkFlagRequired("writ")
 
-	cmd.AddCommand(wrap)
+	repin := &cobra.Command{
+		Use:   "repin <namespace> -- <server command> [args...]",
+		Short: "Re-pin a wrapped server after a deliberate upgrade (RFC-016) — explicit, audited",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			e, err := openEnv()
+			if err != nil {
+				return err
+			}
+			defer e.st.Close()
+			ns := args[0]
+			binPath, binSHA, err := resolveServerHash(args[1])
+			if err != nil {
+				return fmt.Errorf("cannot hash server binary: %w", err)
+			}
+			old := "(none)"
+			if pin, err := e.st.GetServerPin(ns); err == nil {
+				old = pin.SHA256[:16]
+			}
+			if err := e.st.SetServerPin(ns, binPath, binSHA); err != nil {
+				return err
+			}
+			e.st.Audit(store.AuditEvent{Event: "mcp.server_repin", Resource: ns,
+				Reason: fmt.Sprintf("old=%s new=%s path=%s", old, binSHA[:16], binPath)})
+			fmt.Printf("repinned %s\n  path   %s\n  sha256 %s (was %s)\n", ns, binPath, binSHA[:16], old)
+			return nil
+		},
+	}
+
+	cmd.AddCommand(wrap, repin)
 	return cmd
+}
+
+// resolveServerHash resolves a server command on PATH and returns the
+// binary's path and SHA-256 (RFC-016 T1). Honest limit, documented: for
+// interpreter launchers (npx, uvx, docker) this pins the LAUNCHER, not
+// the package tree behind it — full-tree coverage needs a frozen
+// install or an image digest (RFC-016 phases 2–3).
+func resolveServerHash(cmd string) (string, string, error) {
+	path, err := exec.LookPath(cmd)
+	if err != nil {
+		return "", "", err
+	}
+	if abs, err := filepath.EvalSymlinks(path); err == nil {
+		path = abs
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", "", err
+	}
+	return path, hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func secretCmd() *cobra.Command {

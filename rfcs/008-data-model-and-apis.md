@@ -80,6 +80,16 @@ POST /v1/spawn                          writ-gated, NO admin token: the
 The `agents` table gains `spawned_by`, `template`, `expires_at`
 (additive migration) and an `agent_templates` table joins the schema.
 
+*Amended 2026-07-16 by RFC-015/016/017:*
+```
+POST /v1/leases/verify                 {"lease": ...} → {valid, reason, resource}
+                                       (RFC-015: cooperating tool servers verify
+                                       before committing a side effect)
+```
+`POST /v1/writs` accepts `"task"` (RFC-017; ≤200 chars, metadata). The
+`writs` table gains `task` (additive migration); a `server_pins` table
+joins the schema (RFC-016: namespace → binary path + SHA-256).
+
 - **Decisions are POSTs, state changes are POSTs** — no PATCH semantics
   arguments, no PUT idempotency traps on security verbs.
 - **Content never crosses the API:** registration accepts *digests*

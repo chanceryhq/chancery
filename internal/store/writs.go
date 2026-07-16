@@ -33,19 +33,23 @@ type WritMeta struct {
 	State        string
 	MaxDepth     int
 	Exp          time.Time
-	CreatedAt    time.Time
+	// Task is the declared purpose of the grant (RFC-017): operator-
+	// written metadata carried into every decision an intent checker
+	// sees. "" = no declared task.
+	Task      string
+	CreatedAt time.Time
 }
 
 func (s *Store) CreateWrit(id, forPrincipal, agentID string, maxDepth int, exp time.Time,
-	rootBlockID, rootJWS, toAgent string) error {
+	task, rootBlockID, rootJWS, toAgent string) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
-	if _, err := tx.Exec(`INSERT INTO writs (id, for_principal, agent_id, state, max_depth, exp, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, id, forPrincipal, agentID, StateActive, maxDepth, exp, now); err != nil {
+	if _, err := tx.Exec(`INSERT INTO writs (id, for_principal, agent_id, state, max_depth, exp, task, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, id, forPrincipal, agentID, StateActive, maxDepth, exp, task, now); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`INSERT INTO writ_blocks (id, writ_id, parent_id, depth, jws, to_agent, exp, created_at)
@@ -65,9 +69,9 @@ func (s *Store) AppendWritBlock(blockID, writID, parentID string, depth int,
 
 func (s *Store) GetWrit(id string) (*WritMeta, error) {
 	w := &WritMeta{}
-	err := s.db.QueryRow(`SELECT id, for_principal, agent_id, state, max_depth, exp, created_at
+	err := s.db.QueryRow(`SELECT id, for_principal, agent_id, state, max_depth, exp, task, created_at
 		FROM writs WHERE id = ?`, id).
-		Scan(&w.ID, &w.ForPrincipal, &w.AgentID, &w.State, &w.MaxDepth, &w.Exp, &w.CreatedAt)
+		Scan(&w.ID, &w.ForPrincipal, &w.AgentID, &w.State, &w.MaxDepth, &w.Exp, &w.Task, &w.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: writ %s", ErrNotFound, id)
 	}
@@ -172,7 +176,7 @@ func (s *Store) Tree(writID string) ([]WritBlock, error) {
 }
 
 func (s *Store) ListWrits() ([]WritMeta, error) {
-	rows, err := s.db.Query(`SELECT id, for_principal, agent_id, state, max_depth, exp, created_at
+	rows, err := s.db.Query(`SELECT id, for_principal, agent_id, state, max_depth, exp, task, created_at
 		FROM writs ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -182,7 +186,7 @@ func (s *Store) ListWrits() ([]WritMeta, error) {
 	for rows.Next() {
 		var w WritMeta
 		if err := rows.Scan(&w.ID, &w.ForPrincipal, &w.AgentID, &w.State, &w.MaxDepth,
-			&w.Exp, &w.CreatedAt); err != nil {
+			&w.Exp, &w.Task, &w.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, w)

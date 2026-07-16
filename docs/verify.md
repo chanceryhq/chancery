@@ -287,6 +287,59 @@ two DENYs. For the real thing, see
 rm -rf "$CHANCERY_DATA"     # clean up the throwaway state
 ```
 
+## RFC-015 — Leases: a mid-flight revocation fails at the server
+
+```sh
+# Wrap with --lease; the forwarded frames carry a signed lease in
+# params._meta["chancery/lease"]. Simulate the cooperating server:
+LEASE=<paste a lease from a wrapped frame>
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  -d "{\"lease\":\"$LEASE\"}" http://127.0.0.1:7423/v1/leases/verify
+# → {"valid":true, "resource":"<ns>/<tool>", ...}
+chancery writ revoke <writ-id>
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  -d "{\"lease\":\"$LEASE\"}" http://127.0.0.1:7423/v1/leases/verify
+# → {"valid":false, "reason":"authority revoked since minting: ..."}
+chancery audit --limit 10          # mcp.call ALLOW …then… mcp.call_result committed
+```
+
+The SAME lease turns invalid the moment the writ dies — no new token,
+no expiry wait. And the trail now separates "admitted" from
+"committed": `mcp.call_result` is the difference between allowed and
+happened.
+
+## RFC-016 — A drifted server refuses to start
+
+```sh
+chancery mcp wrap --agent <a> --writ <w> --server-name pin-demo -- <server>
+# first run pins: audit shows mcp.server_pin
+cp /some/other/binary <server>     # swap the code behind the same name
+chancery mcp wrap --agent <a> --writ <w> --server-name pin-demo -- <server>
+# → error: server "pin-demo" drifted from its pin … refusing to start (fail closed)
+chancery audit --limit 5           # mcp.server_drift DENY, both hashes named
+chancery mcp repin pin-demo -- <server>   # the deliberate, audited upgrade
+```
+
+## RFC-017 — The intent checker vetoes a technically-allowed call
+
+```sh
+cat > /tmp/checker.sh <<'SH'
+IN=$(cat)
+case "$IN" in *DELETE*|*DROP*) echo '{"decision":"DENY","reason":"destructive op"}';;
+*) echo '{"decision":"ALLOW","reason":"ok"}';; esac
+SH
+chancery writ grant --for user:you@acme.com --to db-bot \
+  --cap "call:db/*" --task "read this week's metrics"
+chancery mcp wrap --agent db-bot --writ <w> \
+  --intent-check "/bin/sh /tmp/checker.sh" -- <db-mcp-server>
+# a SELECT passes; a DELETE dies with -32001 even though the writ allows call:db/query
+chancery audit --limit 5           # mcp.intent_deny — reason recorded, arguments NOT
+```
+
+Try `--intent-mode advise` and watch the same denial become a logged
+`[advise]` verdict while the call proceeds — how you measure a checker
+before trusting it with a veto.
+
 Every guarantee above is also locked by an automated test (see
 [CONTRIBUTING.md](../CONTRIBUTING.md) for the package→RFC map); this doc
 just lets you watch them hold with your own hands. For a single guided

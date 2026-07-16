@@ -50,9 +50,23 @@ type Proxy struct {
 	// additionally checked as net:<host>/<path> — per-navigation
 	// scoping at the same boundary. nil = guard off.
 	NetDecide Decider
+	// Intent, when non-nil, is the intent socket (RFC-017): an external
+	// checker consulted after every deterministic layer allows. It is
+	// the only layer shown tool arguments (transiently — never stored).
+	// IntentAdvise makes a checker DENY log-only instead of blocking.
+	Intent       func(tool string, args map[string]json.RawMessage) policy.Decision
+	IntentAdvise bool
+	// Lease, when non-nil, mints a capability lease (RFC-015) for each
+	// ADMITTED call, injected as params._meta["chancery/lease"] on the
+	// forwarded frame. Cooperating servers verify it before committing
+	// side effects; non-cooperating servers ignore _meta. Additive: a
+	// minting failure forwards the original frame — the admission gate
+	// above remains the floor.
+	Lease func(resource string) (string, error)
 
 	mu          sync.Mutex // guards ClientOut (both loops write to it)
 	pendingList sync.Map   // request id (raw) -> struct{}: outstanding tools/list
+	pendingCall sync.Map   // request id (raw) -> resource: admitted tools/call awaiting result
 }
 
 type envelope struct {
@@ -128,13 +142,34 @@ func (p *Proxy) clientLoop() error {
 					continue
 				}
 			}
+			// Intent socket (RFC-017): consulted last, veto only. In
+			// advise mode a DENY is recorded but the call proceeds — how
+			// an operator measures a checker before trusting it.
+			if p.Intent != nil {
+				if blocked := p.checkIntent(env.ID, params.Name, resource, params.Arguments); blocked {
+					continue
+				}
+			}
 			// Audit BEFORE forwarding: if the record cannot be written,
-			// the action does not happen (RFC-006 §7).
+			// the action does not happen (RFC-006 §7). This is the
+			// "admitted" lifecycle state (RFC-015); the result lands as
+			// mcp.call_result (committed/failed) when the server answers.
 			if err := p.audit("mcp.call", resource, "ALLOW", d.Reason); err != nil {
 				p.deny(env.ID, params.Name, policy.Decision{
 					Effect: policy.Deny, Layer: "audit",
 					Reason: "audit unavailable; refusing unrecordable action"})
 				continue
+			}
+			if env.ID != nil {
+				p.pendingCall.Store(string(env.ID), resource)
+			}
+			// Capability lease (RFC-015): stamp the admitted call so a
+			// cooperating server can re-verify liveness before the side
+			// effect commits.
+			if p.Lease != nil {
+				if stamped := p.stampLease(line, resource); stamped != nil {
+					line = stamped
+				}
 			}
 		case "tools/list":
 			if env.ID != nil {
@@ -146,6 +181,40 @@ func (p *Proxy) clientLoop() error {
 		}
 	}
 	return sc.Err()
+}
+
+// checkIntent consults the external intent checker (RFC-017) and
+// returns true if the call was blocked. Verdicts and infrastructure
+// failures audit as different events (a model's DENY and a broken
+// checker are different facts); neither ever records the arguments.
+func (p *Proxy) checkIntent(id json.RawMessage, tool, resource string, args map[string]json.RawMessage) bool {
+	d := p.Intent(resource, args)
+	if d.Effect == policy.Allow {
+		return false
+	}
+	event := "mcp.intent_deny"
+	if d.Layer == LayerIntentError {
+		event = "mcp.intent_error"
+	}
+	if p.IntentAdvise {
+		// Advise: record what WOULD have been blocked, let it pass.
+		p.audit(event, resource, "ALLOW", "[advise] "+d.Reason)
+		return false
+	}
+	p.audit(event, resource, "DENY", d.Reason)
+	if id == nil {
+		return true
+	}
+	resp, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      json.RawMessage(id),
+		"error": map[string]any{
+			"code":    DeniedCode,
+			"message": fmt.Sprintf("chancery: denied by %s policy: %s", d.Layer, d.Reason),
+		},
+	})
+	p.writeClient(resp)
+	return true
 }
 
 // urlArgKeys are the argument names the URL guard inspects. Browser
@@ -261,8 +330,49 @@ func (p *Proxy) deny(id json.RawMessage, tool string, d policy.Decision) {
 	p.writeClient(resp)
 }
 
+// stampLease mints a lease for an admitted call and injects it into
+// params._meta["chancery/lease"] on the outgoing frame. Returns nil on
+// any failure — the lease is additive (RFC-015); the original frame
+// then forwards unmodified and admission-time enforcement stands alone.
+func (p *Proxy) stampLease(line []byte, resource string) []byte {
+	lease, err := p.Lease(resource)
+	if err != nil {
+		return nil
+	}
+	var full map[string]json.RawMessage
+	if err := json.Unmarshal(line, &full); err != nil {
+		return nil
+	}
+	var params map[string]json.RawMessage
+	if err := json.Unmarshal(full["params"], &params); err != nil {
+		return nil
+	}
+	meta := map[string]json.RawMessage{}
+	if raw, ok := params["_meta"]; ok {
+		json.Unmarshal(raw, &meta)
+	}
+	leaseJSON, _ := json.Marshal(lease)
+	meta["chancery/lease"] = leaseJSON
+	metaRaw, err := json.Marshal(meta)
+	if err != nil {
+		return nil
+	}
+	params["_meta"] = metaRaw
+	paramsRaw, err := json.Marshal(params)
+	if err != nil {
+		return nil
+	}
+	full["params"] = paramsRaw
+	out, err := json.Marshal(full)
+	if err != nil {
+		return nil
+	}
+	return out
+}
+
 // serverLoop forwards server -> agent traffic, filtering tools/list
-// results to what the PDP admits.
+// results to what the PDP admits and recording call lifecycle results
+// (RFC-015: admitted ≠ happened).
 func (p *Proxy) serverLoop() error {
 	sc := bufio.NewScanner(p.ServerOut)
 	sc.Buffer(make([]byte, 64*1024), maxFrame)
@@ -272,14 +382,26 @@ func (p *Proxy) serverLoop() error {
 			continue
 		}
 		var env envelope
-		if err := json.Unmarshal(line, &env); err == nil && env.ID != nil && env.Result != nil {
-			if _, ok := p.pendingList.LoadAndDelete(string(env.ID)); ok {
-				if filtered, n := p.filterToolList(line, env); filtered != nil {
-					p.audit("mcp.list_filtered", "", "", fmt.Sprintf("hidden=%d", n))
-					if err := p.writeClient(filtered); err != nil {
-						return err
+		if err := json.Unmarshal(line, &env); err == nil && env.ID != nil {
+			// Lifecycle result for an admitted call: committed (result)
+			// or failed (error). Best-effort record — the action already
+			// happened; there is nothing left to deny.
+			if res, ok := p.pendingCall.LoadAndDelete(string(env.ID)); ok {
+				if env.Error != nil {
+					p.audit("mcp.call_result", res.(string), "", "failed")
+				} else {
+					p.audit("mcp.call_result", res.(string), "", "committed")
+				}
+			}
+			if env.Result != nil {
+				if _, ok := p.pendingList.LoadAndDelete(string(env.ID)); ok {
+					if filtered, n := p.filterToolList(line, env); filtered != nil {
+						p.audit("mcp.list_filtered", "", "", fmt.Sprintf("hidden=%d", n))
+						if err := p.writeClient(filtered); err != nil {
+							return err
+						}
+						continue
 					}
-					continue
 				}
 			}
 		}

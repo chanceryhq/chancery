@@ -101,6 +101,32 @@ See [the browser-agent example](https://github.com/chanceryhq/chancery/tree/main
 for the full Playwright MCP recipe, and RFC-013 §6 for the honest
 boundaries (top-level `url` args, requested-URL only in MVP).
 
+## The callee, the task, and the moment (RFC-015/016/017)
+
+Three newer concepts complete the per-call picture:
+
+- **Server pin (RFC-016).** The first `mcp wrap` records the server
+  binary's hash; every later wrap re-verifies and refuses to start on
+  drift. Permission is about the caller — the pin is about the callee.
+  Deliberate upgrades are `chancery mcp repin` (explicit, audited).
+  Honest limit: for `npx`-style launchers this pins the launcher, not
+  the package tree behind it.
+- **Task (RFC-017).** `writ grant --task "review PR #123"` writes the
+  grant's *purpose* onto the writ. It shows up in the audit trail and
+  is handed to intent checkers — the one thing a checker can't infer.
+- **Intent socket (RFC-017).** `mcp wrap --intent-check <cmd-or-url>`
+  adds a sixth decision layer after the deterministic five: an external
+  checker sees `{agent, task, tool, args}` and votes. Veto-only, fail
+  closed in `enforce`, log-only in `advise`. Chancery ships no
+  semantic judgment — detectors judge the moment; Chancery pulls the
+  grant.
+- **Capability lease (RFC-015).** `mcp wrap --lease` stamps each
+  admitted call with a 30-second signed lease in `params._meta`; a
+  cooperating server verifies it (`POST /v1/leases/verify`) right
+  before committing, so a revocation landing mid-flight fails at the
+  server. The trail also records `mcp.call_result`
+  (committed/failed): "allowed" and "happened" are different facts.
+
 ## Two invariants you can rely on
 
 - **Metadata-only audit.** The audit schema has no column for prompts,

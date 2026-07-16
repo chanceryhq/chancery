@@ -340,3 +340,84 @@ func TestBrowserWrapNetGuardAndSessionFile(t *testing.T) {
 		t.Errorf("denied navigation must be audited:\n%s", audit)
 	}
 }
+
+// Server pinning (RFC-016 T1): first wrap pins the server binary;
+// swapping the binary behind the same name makes the next wrap refuse
+// to start (fail closed, audited); repin is the deliberate override.
+func TestServerPinDriftRefusalAndRepin(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds subprocesses; skipped in -short")
+	}
+	stub := buildStubServer(t)
+	ch := buildChancery(t)
+	data := t.TempDir()
+
+	runCLI(t, ch, data, "init", "--trust-domain", "acme.com")
+	runCLI(t, ch, data, "agent", "register", "pin-bot",
+		"--owner", "user:a@acme.com", "--purpose", "t", "--prompt", "p", "--model", "m")
+	grant := runCLI(t, ch, data, "writ", "grant", "--for", "user:a@acme.com",
+		"--to", "pin-bot", "--cap", "call:stub/*", "--ttl", "10m")
+	var wid string
+	for _, line := range strings.Split(grant, "\n") {
+		if strings.HasPrefix(line, "writ ") {
+			wid = strings.Fields(line)[1]
+		}
+	}
+
+	// First wrap pins. Run it briefly, then close stdin so it exits.
+	wrap1 := exec.Command(ch, "mcp", "wrap", "--agent", "pin-bot", "--writ", wid,
+		"--server-name", "stub", "--", stub)
+	wrap1.Env = append(os.Environ(), "CHANCERY_DATA="+data)
+	in1, _ := wrap1.StdinPipe()
+	if err := wrap1.Start(); err != nil {
+		t.Fatal(err)
+	}
+	in1.Close()
+	wrap1.Wait()
+	if !strings.Contains(runCLI(t, ch, data, "audit", "--limit", "20"), "mcp.server_pin") {
+		t.Fatal("first wrap must record mcp.server_pin")
+	}
+
+	// Swap the binary: same path, different content.
+	swapped := buildChancery(t) // any other binary
+	raw, err := os.ReadFile(swapped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stub, raw, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second wrap must refuse to start.
+	wrap2 := exec.Command(ch, "mcp", "wrap", "--agent", "pin-bot", "--writ", wid,
+		"--server-name", "stub", "--", stub)
+	wrap2.Env = append(os.Environ(), "CHANCERY_DATA="+data)
+	out, err := wrap2.CombinedOutput()
+	if err == nil {
+		wrap2.Process.Kill()
+		t.Fatalf("wrap of a drifted server must refuse to start:\n%s", out)
+	}
+	if !strings.Contains(string(out), "drifted from its pin") {
+		t.Fatalf("expected drift refusal, got: %s", out)
+	}
+	if !strings.Contains(runCLI(t, ch, data, "audit", "--limit", "20"), "mcp.server_drift") {
+		t.Fatal("drift refusal must audit mcp.server_drift")
+	}
+
+	// Deliberate upgrade: repin, then wrap starts again.
+	repin := runCLI(t, ch, data, "mcp", "repin", "stub", "--", stub)
+	if !strings.Contains(repin, "repinned stub") {
+		t.Fatalf("repin failed: %s", repin)
+	}
+	wrap3 := exec.Command(ch, "mcp", "wrap", "--agent", "pin-bot", "--writ", wid,
+		"--server-name", "stub", "--", stub)
+	wrap3.Env = append(os.Environ(), "CHANCERY_DATA="+data)
+	in3, _ := wrap3.StdinPipe()
+	if err := wrap3.Start(); err != nil {
+		t.Fatal(err)
+	}
+	in3.Close()
+	if err := wrap3.Wait(); err != nil {
+		t.Fatalf("wrap after repin must start cleanly: %v", err)
+	}
+}

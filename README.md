@@ -107,6 +107,21 @@ per-URL, in-path, fail-closed:
 # instance revoke is the session kill switch. See examples/browser-agent.
 ```
 
+The gate guards **both directions**. The callee side: the first wrap
+**pins** the server binary's hash and every later wrap refuses to
+start if it drifted ([RFC-016](rfcs/016-server-pinning.md)) —
+`chancery mcp repin` is the deliberate, audited upgrade path. The
+caller side goes beyond capabilities when you want it to: grant with
+`--task "review PR #123"` and plug any external detector into the
+per-call decision (`--intent-check ./checker.sh` — veto-only,
+advise-or-enforce, arguments never stored;
+[RFC-017](rfcs/017-intent-socket.md)). And `--lease` stamps every
+admitted call with a short-lived signed lease a cooperating server
+verifies via `POST /v1/leases/verify` right before committing — so a
+revocation that lands mid-flight fails at the server instead of
+landing ([RFC-015](rfcs/015-call-lifecycle-and-leases.md)). The audit
+trail distinguishes admitted from committed either way.
+
 Run the control plane as an HTTP API with `./chancery serve`
 (REST/JSON under `/v1`; the admin token is printed once at `init`) —
 and open **http://127.0.0.1:7423/ui** for the embedded **read-only
@@ -143,7 +158,7 @@ a prompt-injected agent cannot talk its way around.
 ```sh
 git clone https://github.com/chanceryhq/chancery && cd chancery
 make build      # -> ./chancery  (Go 1.26+, no CGO, single static binary)
-make test       # go vet + 79 tests across 10 packages, in seconds
+make test       # go vet + 89 tests across 10 packages, in seconds
 make demo       # the 60-second enforcement + audit arc, end to end
 ```
 
@@ -172,3 +187,6 @@ Design happens as a series of locked decisions, one RFC at a time
 | [012](rfcs/012-dynamic-agent-creation.md) | Dynamic agent creation (writ-gated runtime spawn) | In Review |
 | [013](rfcs/013-browser-sessions-and-tokens.md) | Browser sessions and tokens as governed credentials | In Review |
 | [014](rfcs/014-read-only-dashboard.md) | Read-only dashboard (`/ui`) | In Review |
+| [015](rfcs/015-call-lifecycle-and-leases.md) | Call lifecycle and capability leases | In Review |
+| [016](rfcs/016-server-pinning.md) | Server pinning (callee trust, phase 1) | In Review |
+| [017](rfcs/017-intent-socket.md) | Task-bound grants and the intent socket | In Review |

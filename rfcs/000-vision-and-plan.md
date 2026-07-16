@@ -424,6 +424,9 @@ named after.
 | 012 dynamic-agent-creation | Writ-gated runtime spawn: templates, `admin` verb, ephemeral lifecycle | 001, 002, 004, 007, 008 | Added 2026-07-05 from dogfooding: orchestrators that create agents at runtime are the common case, not the edge case |
 | 013 browser-sessions-and-tokens | Sessions as sealed credentials; `net` verb semantics; the URL guard | 001–005 | Added 2026-07-05: browser agents inherit human sessions — the top-named 2026 enterprise concern, unanswered at the identity layer |
 | 014 read-only-dashboard | Embedded `/ui`: timeline, agents, delegation tree, templates — reads only | 006, 008, 011 | Added 2026-07-06: the product's proof is visual; writes stay CLI/API |
+| 015 call-lifecycle-and-leases | `mcp.call_result` lifecycle; capability leases so mid-flight revocation fails at cooperating servers | 002, 005, 006, 008 | Added 2026-07-16 from external design review: "admitted" and "happened" are different facts |
+| 016 server-pinning | Callee trust T1: pin the wrapped server's hash at wrap, refuse on drift, audited repin | 005, 006 | Added 2026-07-16 from practitioner review: permission is about the caller, risk is about the callee |
+| 017 intent-socket | Task-bound grants + a pluggable per-call intent checker (veto-only, advise/enforce) | 002, 004, 005, 006 | Added 2026-07-16: detectors judge the moment; Chancery stays the actuator — now with a socket |
 
 Order of writing: **001 → 002 → 003 → 005 → 006 → 007 → 008 → 010**, with
 004, 009, 011 drafted in parallel and locked later. One RFC at a time; an

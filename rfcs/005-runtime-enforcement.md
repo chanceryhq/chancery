@@ -132,6 +132,15 @@ session state is injected as a server-only file (`--secret-file`).
 The CDP-native browser PEP remains the v2 step; RFC-013 owns the
 browser semantics.
 
+*Amended 2026-07-16 by RFC-015/016/017:* the MCP PEP gained three
+per-call surfaces: **server pinning** (hash verified before spawn,
+refuse on drift — RFC-016), the **intent socket** (an external checker
+as a veto-only sixth decision layer, enforce/advise — RFC-017), and
+**capability leases** (`--lease`: admitted calls stamped in
+`params._meta` for cooperating servers to verify at commit time —
+RFC-015). The proxy also records `mcp.call_result`
+(committed/failed): the trail distinguishes admitted from happened.
+
 ## 5. Why
 
 This is the wedge working end-to-end: question 2's demo (revoke → next

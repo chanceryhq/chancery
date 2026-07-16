@@ -112,6 +112,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/writs/{id}/revoke", s.authed(s.revokeWrit))
 	mux.HandleFunc("GET /v1/audit", s.authed(s.auditTimeline))
 	mux.HandleFunc("GET /v1/audit/verify", s.authed(s.auditVerify))
+	mux.HandleFunc("POST /v1/leases/verify", s.authed(s.verifyLease))
 	return mux
 }
 
@@ -358,6 +359,7 @@ func (s *Server) grantWrit(w http.ResponseWriter, r *http.Request) {
 		Caps       []string `json:"caps"`
 		TTLSeconds int      `json:"ttl_seconds"`
 		MaxDepth   int      `json:"max_depth"`
+		Task       string   `json:"task"`
 	}
 	if err := decode(r, &req); err != nil {
 		fail(w, err)
@@ -371,7 +373,7 @@ func (s *Server) grantWrit(w http.ResponseWriter, r *http.Request) {
 		req.TTLSeconds = 3600
 	}
 	wid, blockID, err := s.Svc.GrantWrit(req.For, req.To, req.Caps,
-		time.Duration(req.TTLSeconds)*time.Second, req.MaxDepth)
+		time.Duration(req.TTLSeconds)*time.Second, req.MaxDepth, req.Task)
 	if err != nil {
 		fail(w, err)
 		return
@@ -527,4 +529,27 @@ func (s *Server) auditVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"intact": true, "verified": n})
+}
+
+// verifyLease is the tool-server side of capability leases (RFC-015): a
+// cooperating server POSTs the lease from params._meta["chancery/lease"]
+// immediately before committing a side effect. valid=false means the
+// authority was revoked (or the lease expired) after the call was
+// admitted — the server should refuse to commit.
+func (s *Server) verifyLease(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Lease string `json:"lease"`
+	}
+	if err := decode(r, &req); err != nil {
+		fail(w, err)
+		return
+	}
+	if req.Lease == "" {
+		writeJSON(w, http.StatusBadRequest, apiError{"lease is required", "invalid"})
+		return
+	}
+	resource, reason, valid := s.Svc.VerifyLease(req.Lease)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"valid": valid, "reason": reason, "resource": resource,
+	})
 }

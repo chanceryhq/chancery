@@ -103,8 +103,15 @@ func (s *Service) StartInstance(agentName string, ttl time.Duration) (*store.Ins
 	return in, tok, nil
 }
 
-// GrantWrit mints block 0 (RFC-002).
-func (s *Service) GrantWrit(forPrincipal, agentName string, capStrs []string, ttl time.Duration, maxDepth int) (widID, blockID string, err error) {
+// GrantWrit mints block 0 (RFC-002). task, when non-empty, is the
+// declared purpose of the grant (RFC-017): operator metadata that rides
+// in the registry and is handed to intent checkers — the one thing a
+// checker cannot infer.
+func (s *Service) GrantWrit(forPrincipal, agentName string, capStrs []string, ttl time.Duration, maxDepth int, task string) (widID, blockID string, err error) {
+	task = strings.TrimSpace(task)
+	if len(task) > 200 {
+		return "", "", errors.New("task must be ≤200 characters (it is metadata, not a prompt)")
+	}
 	a, err := s.resolveAgent(agentName, "writ.grant")
 	if err != nil {
 		return "", "", err
@@ -133,11 +140,14 @@ func (s *Service) GrantWrit(forPrincipal, agentName string, capStrs []string, tt
 	}
 	rootBlockID := "b_" + ulid.Make().String()
 	if err := s.St.CreateWrit(wid, forPrincipal, a.ID, maxDepth, exp,
-		rootBlockID, w.JWS[0], s.Iss.SubjectURI(a.Name)); err != nil {
+		task, rootBlockID, w.JWS[0], s.Iss.SubjectURI(a.Name)); err != nil {
 		return "", "", err
 	}
-	s.St.Audit(store.AuditEvent{Event: "writ.grant", AgentID: a.ID, WritID: wid,
-		Reason: fmt.Sprintf("for=%s caps=%d", forPrincipal, len(caps))})
+	reason := fmt.Sprintf("for=%s caps=%d", forPrincipal, len(caps))
+	if task != "" {
+		reason += " task=" + task
+	}
+	s.St.Audit(store.AuditEvent{Event: "writ.grant", AgentID: a.ID, WritID: wid, Reason: reason})
 	return wid, rootBlockID, nil
 }
 

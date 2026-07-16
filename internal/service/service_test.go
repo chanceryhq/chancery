@@ -52,7 +52,7 @@ func TestShadowAgentObservation(t *testing.T) {
 		t.Error("unregistered instance.start must emit agent.unregistered_ref")
 	}
 
-	if _, _, err := s.GrantWrit("user:a@acme.com", "phantom-bot", []string{"call:x/*"}, 0, 0); err == nil {
+	if _, _, err := s.GrantWrit("user:a@acme.com", "phantom-bot", []string{"call:x/*"}, 0, 0, ""); err == nil {
 		t.Fatal("expected error granting to an unknown agent")
 	}
 	if !hasShadowEvent(t, s, "phantom-bot") {
@@ -101,7 +101,7 @@ func TestGrantRefusesInactiveAgent(t *testing.T) {
 	if err := s.St.SetAgentState("bot", store.StateRevoked); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.GrantWrit("user:a@acme.com", "bot", []string{"call:x/*"}, 0, 0); !errors.Is(err, store.ErrInactive) {
+	if _, _, err := s.GrantWrit("user:a@acme.com", "bot", []string{"call:x/*"}, 0, 0, ""); !errors.Is(err, store.ErrInactive) {
 		t.Errorf("granting to a revoked agent must be refused, got %v", err)
 	}
 }
@@ -112,7 +112,7 @@ func TestBlockForSubjectPicksTheAgentsBlock(t *testing.T) {
 	s := testService(t)
 	s.RegisterAgent("parent", "user:a@acme.com", "t", "p", "c", "tl", "m")
 	s.RegisterAgent("child", "user:a@acme.com", "t", "p", "c", "tl", "m")
-	wid, root, err := s.GrantWrit("user:a@acme.com", "parent", []string{"call:github/*"}, 0, 0)
+	wid, root, err := s.GrantWrit("user:a@acme.com", "parent", []string{"call:github/*"}, 0, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestServiceEndToEnd(t *testing.T) {
 	s.RegisterAgent("parent", "user:a@acme.com", "t", "p", "c", "tl", "m")
 	s.RegisterAgent("child", "user:a@acme.com", "t", "p", "c", "tl", "m")
 
-	wid, _, err := s.GrantWrit("user:a@acme.com", "parent", []string{"call:github/*"}, 0, 0)
+	wid, _, err := s.GrantWrit("user:a@acme.com", "parent", []string{"call:github/*"}, 0, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func spawnFixture(t *testing.T) (*Service, string) {
 		t.Fatal(err)
 	}
 	wid, _, err := s.GrantWrit("user:a@acme.com", "orchestrator",
-		[]string{"call:github/*", "admin:spawn/researcher"}, time.Hour, 0)
+		[]string{"call:github/*", "admin:spawn/researcher"}, time.Hour, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestSpawnRefusedWithoutAdminCap(t *testing.T) {
 	s := testService(t)
 	s.RegisterAgent("plain", "user:a@acme.com", "t", "p", "c", "tl", "m")
 	s.CreateTemplate("researcher", "r", []string{"call:github/get_*"}, time.Hour)
-	wid, _, err := s.GrantWrit("user:a@acme.com", "plain", []string{"call:github/*"}, time.Hour, 0)
+	wid, _, err := s.GrantWrit("user:a@acme.com", "plain", []string{"call:github/*"}, time.Hour, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestExpiredEphemeralIsDeniedAndSwept(t *testing.T) {
 		!strings.Contains(d.Reason, "expired") {
 		t.Errorf("expired ephemeral must be denied in-path, got %+v", d)
 	}
-	if _, _, err := s.GrantWrit("user:a@acme.com", "shortlived", []string{"call:x/y"}, time.Hour, 0); err == nil {
+	if _, _, err := s.GrantWrit("user:a@acme.com", "shortlived", []string{"call:x/y"}, time.Hour, 0, ""); err == nil {
 		t.Error("granting to an expired ephemeral must be refused")
 	}
 	names, err := s.St.SweepExpired()
@@ -320,11 +320,11 @@ func TestGrantsVerbDetectsNetCaps(t *testing.T) {
 	s := testService(t)
 	s.RegisterAgent("web-bot", "user:a@acme.com", "t", "p", "c", "tl", "m")
 	wNet, _, err := s.GrantWrit("user:a@acme.com", "web-bot",
-		[]string{"call:browser/*", "net:github.com/*"}, 0, 0)
+		[]string{"call:browser/*", "net:github.com/*"}, 0, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wCall, _, err := s.GrantWrit("user:a@acme.com", "web-bot", []string{"call:browser/*"}, 0, 0)
+	wCall, _, err := s.GrantWrit("user:a@acme.com", "web-bot", []string{"call:browser/*"}, 0, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,5 +333,70 @@ func TestGrantsVerbDetectsNetCaps(t *testing.T) {
 	}
 	if s.GrantsVerb(wCall, "", "net") {
 		t.Error("call-only writ must not report GrantsVerb(net)")
+	}
+}
+
+// Task-bound grants (RFC-017): the declared purpose rides in the writ
+// metadata (for intent checkers and the audit trail); oversized tasks
+// are refused — the field is metadata, not a prompt.
+func TestTaskBoundGrant(t *testing.T) {
+	s := testService(t)
+	if _, _, err := s.RegisterAgent("task-bot", "user:a@acme.com", "p", "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	wid, _, err := s.GrantWrit("user:a@acme.com", "task-bot",
+		[]string{"call:github/*"}, time.Hour, 0, "review PR #123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := s.St.GetWrit(wid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Task != "review PR #123" {
+		t.Errorf("task not stored: %q", w.Task)
+	}
+	long := strings.Repeat("x", 201)
+	if _, _, err := s.GrantWrit("user:a@acme.com", "task-bot",
+		[]string{"call:github/*"}, time.Hour, 0, long); err == nil {
+		t.Error("a >200-char task must be refused")
+	}
+}
+
+// Capability leases (RFC-015): valid while the authority lives, dead
+// the moment the writ (or block path) is revoked — mid-flight
+// revocation fails at the cooperating server, not after landing.
+func TestLeaseMintVerifyAndRevocation(t *testing.T) {
+	s := testService(t)
+	if _, _, err := s.RegisterAgent("lease-bot", "user:a@acme.com", "p", "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	wid, blk, err := s.GrantWrit("user:a@acme.com", "lease-bot",
+		[]string{"call:stub/*"}, time.Hour, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := s.MintLease(wid, blk, "lease-bot", "stub/echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, reason, valid := s.VerifyLease(lease)
+	if !valid || res != "stub/echo" {
+		t.Fatalf("fresh lease must verify (valid=%v reason=%q res=%q)", valid, reason, res)
+	}
+	// Tampered lease: flip a byte in the signature.
+	bad := lease[:len(lease)-2] + "xx"
+	if _, _, valid := s.VerifyLease(bad); valid {
+		t.Error("tampered lease must not verify")
+	}
+	// Revoke the writ: the SAME lease dies — liveness is re-checked at
+	// verification, which is the whole point.
+	if err := s.St.RevokeWrit(wid); err != nil {
+		t.Fatal(err)
+	}
+	if _, reason, valid := s.VerifyLease(lease); valid {
+		t.Error("lease must die when its writ is revoked")
+	} else if !strings.Contains(reason, "revoked") {
+		t.Errorf("reason should name revocation, got %q", reason)
 	}
 }
