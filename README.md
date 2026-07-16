@@ -113,7 +113,15 @@ launch by container, the whole directory tree with `--pin-tree` (a
 poisoned `node_modules` file refuses to start), or the binary's hash
 by default — and every later wrap refuses on drift
 ([RFC-016](rfcs/016-server-pinning.md)); `chancery mcp repin` is the
-deliberate, audited upgrade path. The
+deliberate, audited upgrade path. Skip `npx` entirely with
+`chancery mcp install <pkg>@<version>`: a frozen, scripts-disabled
+install that is tree-pinned automatically
+([RFC-018](rfcs/018-frozen-installs-and-confinement.md)) — and go
+further with `mcp wrap --confine`, which turns the pin's manifest
+(`--egress` hosts, `--writable` paths) into an OS boundary: an
+auditing egress allow-list proxy plus a read-only-outside-the-manifest
+sandbox, refusing to spawn rather than ever running unconfined.
+`mcp wrap --dry-run` preflights all of it without spawning anything. The
 caller side goes beyond capabilities when you want it to: grant with
 `--task "review PR #123"` and plug any external detector into the
 per-call decision (`--intent-check ./checker.sh` — veto-only,
@@ -144,11 +152,12 @@ any edit, deletion, or reorder. Known MVP gaps are published in
 
 - [**Quickstart (MCP)**](QUICKSTART.md) — govern the real filesystem MCP server in 5 minutes
 - [**Governing any agent**](docs/governing-any-agent.md) — the non-MCP path: identity, policy, revocation, audit for any job in any language
-- [**Testing playbook**](docs/testing-playbook.md) — one guided ~20-minute run through every feature (001–017), with expected output at each step
+- [**Testing playbook**](docs/testing-playbook.md) — one guided ~20-minute run through every feature (001–018), with expected output at each step
 - [**Verify every claim yourself**](docs/verify.md) — hands-on, by-hand checks that each RFC does what it says
 - [Concepts](docs/concepts.md) — agent, version, instance, writ
 - [**Browser agents**](examples/browser-agent/README.md) — custodied sessions + scoped navigation for Playwright MCP
 - [Claude Code / MCP client setup](examples/claude-code/README.md) — the `.mcp.json` drop-in
+- [**Perseus Vault**](examples/perseus-vault/README.md) — provable authority + provable content: reader/writer writs for a crypto-chained memory store
 - [Go SDK](sdk/) and [example agent](examples/go-agent/) — advisory in-process checks over the API
 - [LangGraph / Python agents](examples/langgraph/README.md) — the deployment-shaped integration
 
@@ -161,7 +170,7 @@ a prompt-injected agent cannot talk its way around.
 ```sh
 git clone https://github.com/chanceryhq/chancery && cd chancery
 make build      # -> ./chancery  (Go 1.26+, no CGO, single static binary)
-make test       # go vet + 93 tests across 10 packages, in seconds
+make test       # go vet + 104 tests across 11 packages, in seconds
 make demo       # the 60-second enforcement + audit arc, end to end
 ```
 
@@ -193,3 +202,4 @@ Design happens as a series of locked decisions, one RFC at a time
 | [015](rfcs/015-call-lifecycle-and-leases.md) | Call lifecycle and capability leases | In Review |
 | [016](rfcs/016-server-pinning.md) | Server pinning (callee trust, phase 1) | In Review |
 | [017](rfcs/017-intent-socket.md) | Task-bound grants and the intent socket | In Review |
+| [018](rfcs/018-frozen-installs-and-confinement.md) | Frozen installs and manifest-bounded confinement | In Review |

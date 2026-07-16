@@ -101,9 +101,9 @@ See [the browser-agent example](https://github.com/chanceryhq/chancery/tree/main
 for the full Playwright MCP recipe, and RFC-013 §6 for the honest
 boundaries (top-level `url` args, requested-URL only in MVP).
 
-## The callee, the task, and the moment (RFC-015/016/017)
+## The callee, the task, and the moment (RFC-015/016/017/018)
 
-Three newer concepts complete the per-call picture:
+These newer concepts complete the per-call picture:
 
 - **Server pin (RFC-016).** The first `mcp wrap` records the server's
   identity; every later wrap re-verifies and refuses to start on
@@ -114,7 +114,21 @@ Three newer concepts complete the per-call picture:
   binary hash can't see), or the **binary hash** by default. Deliberate
   upgrades are `chancery mcp repin` (explicit, audited). Honest limit:
   the *default* tier pins only the launcher for `npx`-style servers —
-  use `--pin-tree` or a digest there.
+  use `mcp install`, `--pin-tree`, or a digest there.
+- **Frozen install (RFC-018).** `chancery mcp install <pkg>@<version>`
+  replaces `npx` with a one-time, exact-version, scripts-disabled
+  install into Chancery's own directory, tree-pinned automatically —
+  the guided path to the strong tier. Mutable specs (`latest`, `^`)
+  are refused: a mutable reference is not an identity.
+- **Confinement manifest (RFC-018).** The pin also carries what the
+  server *process* may do: `egress` hosts (empty = no network) and
+  `writable` paths (empty = read-only). `mcp wrap --confine` applies
+  it as an OS boundary — an auditing egress allow-list proxy plus a
+  sandbox — and refuses to spawn where it can't, never running
+  silently unconfined. Deliberately separate from the writ: the writ
+  bounds each call under a grant; the manifest bounds the process
+  (a GitHub server needs api.github.com even with no `net:…` caps).
+  Preflight everything with `mcp wrap --dry-run`.
 - **Task (RFC-017).** `writ grant --task "review PR #123"` writes the
   grant's *purpose* onto the writ. It shows up in the audit trail and
   is handed to intent checkers — the one thing a checker can't infer.

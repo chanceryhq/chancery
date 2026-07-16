@@ -427,6 +427,7 @@ named after.
 | 015 call-lifecycle-and-leases | `mcp.call_result` lifecycle; capability leases so mid-flight revocation fails at cooperating servers | 002, 005, 006, 008 | Added 2026-07-16 from external design review: "admitted" and "happened" are different facts |
 | 016 server-pinning | Callee trust T1: pin the wrapped server's hash at wrap, refuse on drift, audited repin | 005, 006 | Added 2026-07-16 from practitioner review: permission is about the caller, risk is about the callee |
 | 017 intent-socket | Task-bound grants + a pluggable per-call intent checker (veto-only, advise/enforce) | 002, 004, 005, 006 | Added 2026-07-16: detectors judge the moment; Chancery stays the actuator — now with a socket |
+| 018 frozen-installs-and-confinement | `mcp install` (frozen, tree-pinned server installs) + `--confine` (manifest-bounded egress/FS as an OS boundary, fail closed) | 005, 006, 016 | Added 2026-07-16: the guided default G13 asked for; the writ bounds the call, the manifest bounds the process |
 
 Order of writing: **001 → 002 → 003 → 005 → 006 → 007 → 008 → 010**, with
 004, 009, 011 drafted in parallel and locked later. One RFC at a time; an

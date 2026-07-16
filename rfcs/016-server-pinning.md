@@ -119,7 +119,9 @@ audit event carries hashes and path only, never arguments or content.
   `node_modules` file (invisible to T1) refused under `--pin-tree` +
   tree repin.
 
-**Deferred to follow-up (issue #5):** `chancery mcp install`
-(Chancery-managed frozen installs — convenience over T2's primitive)
+**Follow-up, since shipped:** `chancery mcp install` (Chancery-managed
+frozen installs — the guided default over T2's primitive; a tree pin
+now follows its namespace so plain wraps re-verify it automatically)
 and manifest-bounded runtime confinement (egress allow-lists,
-read-only FS) — a different operational model deserving its own RFC.
+read-only FS) are
+[RFC-018](018-frozen-installs-and-confinement.md).

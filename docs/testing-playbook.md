@@ -1,7 +1,10 @@
 # The Chancery Testing Playbook
 
 A complete, guided test run of every feature (RFC-001 → RFC-014) in
-one sitting, ~20 minutes. Each step says **what you're testing**,
+one sitting, ~20 minutes — with the newer per-call mechanisms
+(leases, pinning + frozen installs, the intent socket, confinement:
+RFC-015 → RFC-018) walked hands-on in [verify.md](verify.md) and
+locked by the automated suite in step 13. Each step says **what you're testing**,
 **the commands**, and **what you must see**. Every command here has
 been run verbatim against the current build — if something differs,
 that's a bug: [report it](../SECURITY.md).
@@ -348,7 +351,7 @@ make demo
 make test
 ```
 
-**Expect:** `go vet` clean and 93 tests across 10 packages green —
+**Expect:** `go vet` clean and 104 tests across 11 packages green —
 every step in this playbook is also locked by at least one of them
 (the map is in [CONTRIBUTING.md](../CONTRIBUTING.md)).
 

@@ -359,6 +359,37 @@ Try `--intent-mode advise` and watch the same denial become a logged
 `[advise]` verdict while the call proceeds — how you measure a checker
 before trusting it with a veto.
 
+## RFC-018 — Frozen installs and confinement
+
+The guided path to the strong pin tier — no Docker, no hand-built dir:
+
+```sh
+chancery mcp install @modelcontextprotocol/server-filesystem@2025.7.1 \
+  --server-name fs --writable /tmp/agent-scratch
+# → installed … identity tree:<hash> (pinned — wrap re-verifies before every spawn)
+chancery mcp install some-server@latest
+# → refused: not an exact version — a mutable reference is not an identity
+
+# Poison ONE installed file and the next wrap refuses before spawning:
+echo "//x" >> "$CHANCERY_DATA/servers/fs/node_modules/.../index.js"
+chancery mcp wrap --agent <a> --writ <w> --server-name fs -- \
+  "$CHANCERY_DATA/servers/fs/node_modules/.bin/mcp-server-filesystem" /tmp/agent-scratch
+# → drifted from its pin … refusing to start; audit shows mcp.server_drift
+```
+
+Preflight without side effects, then confine:
+
+```sh
+chancery mcp wrap --agent <a> --writ <w> --server-name fs --dry-run -- <cmd>
+# → effective authority, pin status, manifest — nothing spawned, nothing pinned
+
+chancery mcp wrap --agent <a> --writ <w> --server-name fs --confine -- <cmd>
+# egress not in the manifest → proxy 403 + mcp.server_egress_denied (host only);
+# writes outside --writable → denied by the OS sandbox;
+# no sandbox available → the spawn REFUSES (mcp.confine_refused) — never
+# silently unconfined. Manifest changes: chancery mcp repin fs --egress … -- <cmd>
+```
+
 Every guarantee above is also locked by an automated test (see
 [CONTRIBUTING.md](../CONTRIBUTING.md) for the package→RFC map); this doc
 just lets you watch them hold with your own hands. For a single guided

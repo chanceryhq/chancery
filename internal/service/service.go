@@ -404,6 +404,35 @@ func (s *Service) GrantsVerb(widID, leafBlockID, verb string) bool {
 	return false
 }
 
+// EffectiveAuthority returns the verified chain's block-0 grant and
+// each later block's caveats, rendered as verb:resource strings. Used
+// by preflight views (`mcp wrap --dry-run`): what a call would be
+// evaluated against, without making one.
+func (s *Service) EffectiveAuthority(widID, leafBlockID string) (grant []string, caveats [][]string, err error) {
+	if leafBlockID == "" {
+		b, err := s.St.LatestBlock(widID)
+		if err != nil {
+			return nil, nil, err
+		}
+		leafBlockID = b.ID
+	}
+	w, err := s.verifiedPath(leafBlockID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, c := range w.Blocks[0].Cap {
+		grant = append(grant, c.String())
+	}
+	for _, b := range w.Blocks[1:] {
+		var cs []string
+		for _, c := range b.Caveat {
+			cs = append(cs, c.String())
+		}
+		caveats = append(caveats, cs)
+	}
+	return grant, caveats, nil
+}
+
 // verifiedPath loads a root→leaf block path (revocation-checked by the
 // registry) and cryptographically verifies the chain.
 func (s *Service) verifiedPath(leafBlockID string) (*writ.Writ, error) {

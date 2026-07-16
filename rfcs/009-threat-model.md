@@ -142,9 +142,10 @@ phase. A threat model that hides its gaps is marketing.
 | G10 | Writ-gated spawn is capability-URL (no PoP) | Knowing writ+agent ids ≈ bearer for `/v1/spawn`, bounded by the writ's own PDP gate | RFC-012 · v1 (`dk` proof-of-possession) |
 | G11 | URL guard coverage is heuristic | Only top-level `url`/`uri` args checked; requested URL only (server-side redirects unseen); in-page actions not URL-shaped | RFC-013 · v1 (argument schemas) / v2 (CDP PEP) |
 | G12 | Admin token in browser session storage | Read-only `/ui` dashboard; XSS or exposed bind would leak the token | RFC-014 · v1 (scoped viewer tokens) |
-| G13 | Default server pinning is launcher-deep (T1) | `npx`-style launchers: package tree unmeasured by default; poisoned transitive deps pass unless `--pin-tree` (T2) or image digest (T3) is used — both shipped, opt-in | RFC-016 · v1 (guided default via `mcp install`) |
+| G13 | Default server pinning is launcher-deep (T1) | `npx`-style launchers: package tree unmeasured by default; poisoned transitive deps pass unless the guided path (`mcp install`, RFC-018), `--pin-tree`, or an image digest is used | RFC-016/018 · guided default shipped; residual = choosing npx over install |
 | G14 | Leases need server cooperation | Non-cooperating servers never verify; mid-flight revocation still commits there | RFC-015 · inherent (per-server opt-in) |
 | G15 | Intent checker sees arguments | Operator-chosen checker processes payloads (veto-only; cannot widen) | RFC-017 · inherent (documented; args never stored) |
+| G16 | Confinement is host-granular, platform-uneven | Exfil to an *allowed* host still possible; Linux egress is proxy-env cooperative until netns (FS is kernel-bounded); macOS bounds both | RFC-018 · v1 (Linux netns; argument schemas for narrower rules) |
 
 ## 6. What this means for RFC-010
 

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -153,6 +154,7 @@ CREATE TABLE IF NOT EXISTS server_pins (
 	namespace TEXT PRIMARY KEY,
 	kind TEXT NOT NULL DEFAULT 'binary',
 	path TEXT NOT NULL, sha256 TEXT NOT NULL,
+	egress TEXT NOT NULL DEFAULT '[]', writable TEXT NOT NULL DEFAULT '[]',
 	created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
 );
 CREATE TABLE IF NOT EXISTS writ_blocks (
@@ -198,6 +200,8 @@ func Open(path string) (*Store, error) {
 		`ALTER TABLE agents ADD COLUMN expires_at TIMESTAMP`,
 		`ALTER TABLE writs ADD COLUMN task TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE server_pins ADD COLUMN kind TEXT NOT NULL DEFAULT 'binary'`,
+		`ALTER TABLE server_pins ADD COLUMN egress TEXT NOT NULL DEFAULT '[]'`,
+		`ALTER TABLE server_pins ADD COLUMN writable TEXT NOT NULL DEFAULT '[]'`,
 	} {
 		if _, err := db.Exec(ddl); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return nil, fmt.Errorf("migrate: %w", err)
@@ -665,11 +669,18 @@ func (s *Store) CheckIssuable(instanceID string) (*Agent, *Version, *Instance, e
 // full dependency tree), or "digest" (T3, a container image digest —
 // the full filesystem, enforced by the container runtime's
 // content-addressing).
+// Egress and Writable form the pin's confinement manifest (RFC-018):
+// hosts the server process may reach (empty = no network) and paths it
+// may write (empty = read-only). Operator-declared at pin time, changed
+// only via audited repin — deliberately separate from the writ, which
+// bounds calls, not the process.
 type ServerPin struct {
 	Namespace string
 	Kind      string
 	Path      string
 	SHA256    string
+	Egress    []string
+	Writable  []string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -683,13 +694,46 @@ const (
 
 func (s *Store) GetServerPin(namespace string) (*ServerPin, error) {
 	p := &ServerPin{}
-	err := s.db.QueryRow(`SELECT namespace, kind, path, sha256, created_at, updated_at
+	var egress, writable string
+	err := s.db.QueryRow(`SELECT namespace, kind, path, sha256, egress, writable, created_at, updated_at
 		FROM server_pins WHERE namespace = ?`, namespace).
-		Scan(&p.Namespace, &p.Kind, &p.Path, &p.SHA256, &p.CreatedAt, &p.UpdatedAt)
+		Scan(&p.Namespace, &p.Kind, &p.Path, &p.SHA256, &egress, &writable, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: server pin %q", ErrNotFound, namespace)
 	}
-	return p, err
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(egress), &p.Egress); err != nil {
+		return nil, fmt.Errorf("pin %s: corrupt egress manifest: %w", namespace, err)
+	}
+	if err := json.Unmarshal([]byte(writable), &p.Writable); err != nil {
+		return nil, fmt.Errorf("pin %s: corrupt writable manifest: %w", namespace, err)
+	}
+	return p, nil
+}
+
+// SetServerManifest sets a pin's confinement manifest (RFC-018). The
+// pin must already exist — the manifest describes pinned code. The
+// caller audits: manifest changes are security events.
+func (s *Store) SetServerManifest(namespace string, egress, writable []string) error {
+	if egress == nil {
+		egress = []string{}
+	}
+	if writable == nil {
+		writable = []string{}
+	}
+	ej, _ := json.Marshal(egress)
+	wj, _ := json.Marshal(writable)
+	res, err := s.db.Exec(`UPDATE server_pins SET egress = ?, writable = ?, updated_at = ?
+		WHERE namespace = ?`, string(ej), string(wj), time.Now().UTC(), namespace)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("%w: server pin %q", ErrNotFound, namespace)
+	}
+	return nil
 }
 
 // SetServerPin creates or replaces a namespace's pin (first wrap pins;

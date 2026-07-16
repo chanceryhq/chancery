@@ -787,17 +787,68 @@ func writCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rows := [][]string{{"ID", "STATE", "FOR", "EXPIRES"}}
+			rows := [][]string{{"ID", "STATE", "FOR", "EXPIRES", "TTL LEFT"}}
 			for _, w := range writs {
-				rows = append(rows, []string{w.ID, w.State, w.ForPrincipal, w.Exp.Format(time.RFC3339)})
+				rows = append(rows, []string{w.ID, w.State, w.ForPrincipal,
+					w.Exp.Format(time.RFC3339), ttlLeft(w.State, w.Exp)})
 			}
 			table(rows)
 			return nil
 		},
 	}
 
-	cmd.AddCommand(grant, delegate, show, check, revoke, list)
+	example := &cobra.Command{
+		Use:   "example",
+		Short: "Print common capability patterns — the verb:resource grammar by example",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fmt.Print(`capabilities are verb:resource patterns; for a wrapped MCP server the
+resource is <namespace>/<tool>, where the namespace comes from --server-name.
+
+  call:github/*                every tool on the github server
+  call:github/get_*            read-shaped tools only
+  call:fs/read_file            exactly one tool
+  net:github.com/*             URL guard: navigation on github.com (RFC-013)
+  net:*.internal.acme.com/*    any subdomain, any path
+  admin:spawn/researcher       may spawn agents from the researcher template (RFC-012)
+
+grant reads:                   delegate narrows (never widens):
+  chancery writ grant \          chancery writ delegate <writ-id> \
+    --for user:you@acme.com \      --to test-runner \
+    --to deploy-bot \              --caveat "call:github/get_*"
+    --cap "call:github/*" \
+    --ttl 8h --task "review PR #123"
+
+check without calling:  chancery writ check <writ-id> --resource github/get_pull_request
+preflight a wrap:       chancery mcp wrap --agent <a> --writ <id> --dry-run -- <server-cmd>
+`)
+			return nil
+		},
+	}
+
+	cmd.AddCommand(grant, delegate, show, check, revoke, list, example)
 	return cmd
+}
+
+// ttlLeft humanizes a writ's remaining lifetime for `writ list` —
+// "what's about to expire" shouldn't require timestamp arithmetic.
+func ttlLeft(state string, exp time.Time) string {
+	if state != "active" {
+		return "-"
+	}
+	d := time.Until(exp)
+	if d <= 0 {
+		return "expired"
+	}
+	switch {
+	case d >= 48*time.Hour:
+		return fmt.Sprintf("%dd%dh", int(d.Hours())/24, int(d.Hours())%24)
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+	default:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
 }
 
 func serveCmd() *cobra.Command {
@@ -837,6 +888,8 @@ func mcpCmd() *cobra.Command {
 	var intentTimeout time.Duration
 	var lease bool
 	var pinTree string
+	var confineOn, dryRun bool
+	var egressHosts, writablePaths []string
 	wrap := &cobra.Command{
 		Use:   "wrap --agent <name> --writ <id> -- <server command> [args...]",
 		Short: "Run an MCP server behind Chancery: per-call policy, audit, sealed secrets",
@@ -895,11 +948,31 @@ func mcpCmd() *cobra.Command {
 			// First wrap records the identity; every later wrap
 			// re-verifies and refuses on drift — fail closed, audited.
 			// Deliberate upgrades go through `chancery mcp repin`.
+			pin, pinErr := e.st.GetServerPin(serverName)
+			if pinErr != nil && !errors.Is(pinErr, store.ErrNotFound) {
+				return pinErr
+			}
+			// A tree pin follows the namespace: once pinned as a tree
+			// (`mcp install` or --pin-tree), plain wraps re-verify the
+			// stored tree — forgetting the flag must not silently
+			// degrade the tier to a binary hash.
+			if pin != nil && pin.Kind == store.PinTree && pinTree == "" {
+				pinTree = pin.Path
+			}
 			pinKind, pinPath, pinSHA, err := resolvePinIdentity(args, pinTree)
 			if err != nil {
 				return fmt.Errorf("cannot resolve server identity: %w", err)
 			}
-			if pin, err := e.st.GetServerPin(serverName); err == nil {
+			if dryRun {
+				return printPreflight(e, a.Name, writID, leaf, serverName, pin, pinKind, pinSHA, confineOn)
+			}
+			if pin != nil {
+				// The manifest describes pinned code; changing it on a
+				// live pin is a deliberate, audited operator action.
+				if len(egressHosts) > 0 || len(writablePaths) > 0 {
+					return fmt.Errorf("%s is already pinned — manifest changes are deliberate: run `chancery mcp repin %s --egress/--writable ... -- <cmd>`",
+						serverName, serverName)
+				}
 				if pin.Kind != pinKind || pin.SHA256 != pinSHA {
 					e.st.Audit(store.AuditEvent{Event: "mcp.server_drift", AgentID: a.ID,
 						WritID: writID, Resource: serverName, Decision: "DENY",
@@ -912,14 +985,22 @@ func mcpCmd() *cobra.Command {
 					return fmt.Errorf("server %q drifted from its pin (pinned %s…, found %s…): refusing to start (fail closed) — after a deliberate upgrade run: %s -- %s",
 						serverName, pinDescribe(pin.Kind, pin.SHA256), pinDescribe(pinKind, pinSHA), repinHint, strings.Join(args, " "))
 				}
-			} else if errors.Is(err, store.ErrNotFound) {
+			} else {
 				if err := e.st.SetServerPin(serverName, pinKind, pinPath, pinSHA); err != nil {
 					return err
 				}
+				if len(egressHosts) > 0 || len(writablePaths) > 0 {
+					if err := e.st.SetServerManifest(serverName, egressHosts, writablePaths); err != nil {
+						return err
+					}
+				}
 				e.st.Audit(store.AuditEvent{Event: "mcp.server_pin", AgentID: a.ID,
-					Resource: serverName, Reason: fmt.Sprintf("%s path=%s", pinDescribe(pinKind, pinSHA), pinPath)})
-			} else {
-				return err
+					Resource: serverName, Reason: fmt.Sprintf("%s path=%s egress=%s writable=%s",
+						pinDescribe(pinKind, pinSHA), pinPath,
+						strings.Join(egressHosts, ","), strings.Join(writablePaths, ","))})
+				if pin, err = e.st.GetServerPin(serverName); err != nil {
+					return err
+				}
 			}
 			// The wrapped session is a runtime instance (RFC-001):
 			// `chancery instance revoke` kills it on its next call.
@@ -984,6 +1065,28 @@ func mcpCmd() *cobra.Command {
 						}
 					}
 				}
+			}
+
+			// Confinement (RFC-018): the pin's manifest becomes an OS
+			// boundary — loopback-only egress through an auditing
+			// allow-list proxy, read-only filesystem outside the
+			// declared writable paths. Refused-and-audited when the OS
+			// layer is unavailable; never silently unconfined.
+			if confineOn {
+				cargs, cenv, cleanup, cerr := applyConfinement(pin.Egress, pin.Writable, args, childEnv,
+					func(host string) {
+						e.st.Audit(store.AuditEvent{Event: "mcp.server_egress_denied",
+							AgentID: a.ID, Instance: inst.ID, WritID: writID,
+							Verb: "net", Resource: host, Decision: "DENY",
+							Reason: fmt.Sprintf("host not in %s manifest (repin --egress to change)", serverName)})
+					})
+				if cerr != nil {
+					e.st.Audit(store.AuditEvent{Event: "mcp.confine_refused", AgentID: a.ID,
+						Instance: inst.ID, Resource: serverName, Decision: "DENY", Reason: cerr.Error()})
+					return cerr
+				}
+				defer cleanup()
+				args, childEnv = cargs, cenv
 			}
 
 			server := exec.Command(args[0], args[1:]...)
@@ -1096,10 +1199,19 @@ func mcpCmd() *cobra.Command {
 		"stamp admitted calls with a capability lease in params._meta (RFC-015; cooperating servers verify via POST /v1/leases/verify)")
 	wrap.Flags().StringVar(&pinTree, "pin-tree", "",
 		"pin the whole directory tree (RFC-016 T2): Merkle hash of every file; any change refuses to start")
+	wrap.Flags().BoolVar(&confineOn, "confine", false,
+		"apply the pin's confinement manifest as an OS boundary (RFC-018): egress allow-list proxy + read-only FS outside writable paths; refuses to spawn if unsupported")
+	wrap.Flags().StringSliceVar(&egressHosts, "egress", nil,
+		"confinement manifest, set on FIRST pin only: host the server may reach (repeatable; later changes via repin)")
+	wrap.Flags().StringSliceVar(&writablePaths, "writable", nil,
+		"confinement manifest, set on FIRST pin only: path the server may write (repeatable; later changes via repin)")
+	wrap.Flags().BoolVar(&dryRun, "dry-run", false,
+		"preflight only: print the effective authority, pin status, and manifest this wrap would enforce — spawn nothing, pin nothing")
 	wrap.MarkFlagRequired("agent")
 	wrap.MarkFlagRequired("writ")
 
 	var repinTree string
+	var repinEgress, repinWritable []string
 	repin := &cobra.Command{
 		Use:   "repin <namespace> -- <server command> [args...]",
 		Short: "Re-pin a wrapped server after a deliberate upgrade (RFC-016) — explicit, audited",
@@ -1122,17 +1234,86 @@ func mcpCmd() *cobra.Command {
 			if err := e.st.SetServerPin(ns, kind, path, sha); err != nil {
 				return err
 			}
+			// Manifest changes ride the same deliberate, audited path
+			// as identity changes (RFC-018): passing the flag replaces
+			// that list (an explicitly empty flag clears it); omitting
+			// it leaves the stored manifest untouched.
+			manifestNote := ""
+			if cmd.Flags().Changed("egress") || cmd.Flags().Changed("writable") {
+				pinNow, err := e.st.GetServerPin(ns)
+				if err != nil {
+					return err
+				}
+				eg, wr := pinNow.Egress, pinNow.Writable
+				if cmd.Flags().Changed("egress") {
+					eg = repinEgress
+				}
+				if cmd.Flags().Changed("writable") {
+					wr = repinWritable
+				}
+				if err := e.st.SetServerManifest(ns, eg, wr); err != nil {
+					return err
+				}
+				manifestNote = fmt.Sprintf(" egress=%s writable=%s", strings.Join(eg, ","), strings.Join(wr, ","))
+			}
 			e.st.Audit(store.AuditEvent{Event: "mcp.server_repin", Resource: ns,
-				Reason: fmt.Sprintf("old=%s new=%s path=%s", old, pinDescribe(kind, sha), path)})
-			fmt.Printf("repinned %s\n  path   %s\n  identity %s (was %s)\n", ns, path, pinDescribe(kind, sha), old)
+				Reason: fmt.Sprintf("old=%s new=%s path=%s%s", old, pinDescribe(kind, sha), path, manifestNote)})
+			fmt.Printf("repinned %s\n  path   %s\n  identity %s (was %s)%s\n", ns, path, pinDescribe(kind, sha), old, manifestNote)
 			return nil
 		},
 	}
 	repin.Flags().StringVar(&repinTree, "pin-tree", "",
 		"re-pin as a directory tree (RFC-016 T2)")
+	repin.Flags().StringSliceVar(&repinEgress, "egress", nil,
+		"replace the confinement manifest's egress hosts (RFC-018; pass an empty value to clear)")
+	repin.Flags().StringSliceVar(&repinWritable, "writable", nil,
+		"replace the confinement manifest's writable paths (RFC-018; pass an empty value to clear)")
 
 	cmd.AddCommand(wrap, repin)
+	installCmd(cmd)
 	return cmd
+}
+
+// printPreflight renders `mcp wrap --dry-run` (RFC-018; asked for by
+// the first outside integrator): everything this wrap would enforce,
+// with nothing spawned and nothing pinned.
+func printPreflight(e *env, agentName, writID, leaf, serverName string,
+	pin *store.ServerPin, foundKind, foundSHA string, confineOn bool) error {
+	grant, caveats, err := e.svc.EffectiveAuthority(writID, leaf)
+	if err != nil {
+		return err
+	}
+	a, err := e.st.GetAgentByName(agentName)
+	if err != nil {
+		return err
+	}
+	allowlist, _ := e.st.GetAllowlist(a.ID)
+	fmt.Printf("dry run — nothing spawned, nothing pinned\n")
+	fmt.Printf("  agent      %s (%s)\n  writ       %s  block %s\n", agentName, a.State, writID, leaf)
+	fmt.Printf("  grant      %s\n", strings.Join(grant, ", "))
+	for i, cs := range caveats {
+		fmt.Printf("  caveats    block %d: %s\n", i+1, strings.Join(cs, ", "))
+	}
+	if len(allowlist) > 0 {
+		fmt.Printf("  allowlist  %s\n", strings.Join(allowlist, ", "))
+	}
+	fmt.Printf("  namespace  %s\n", serverName)
+	switch {
+	case pin == nil:
+		fmt.Printf("  pin        (none — first real wrap would pin %s)\n", pinDescribe(foundKind, foundSHA))
+	case pin.Kind != foundKind || pin.SHA256 != foundSHA:
+		fmt.Printf("  pin        DRIFT: pinned %s, found %s — a real wrap would REFUSE to start\n",
+			pinDescribe(pin.Kind, pin.SHA256), pinDescribe(foundKind, foundSHA))
+	default:
+		fmt.Printf("  pin        %s (matches)\n", pinDescribe(pin.Kind, pin.SHA256))
+	}
+	if pin != nil {
+		fmt.Printf("  manifest   egress=[%s] writable=[%s] (--confine %s)\n",
+			strings.Join(pin.Egress, ", "), strings.Join(pin.Writable, ", "),
+			map[bool]string{true: "on", false: "off"}[confineOn])
+	}
+	fmt.Printf("\na tool T on this server is callable iff call:%s/T passes the authority above — per call, with fresh revocation state\n", serverName)
+	return nil
 }
 
 func secretCmd() *cobra.Command {
