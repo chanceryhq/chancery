@@ -59,7 +59,7 @@ work end to end, and it's what the README's "60-second story" refers to.
 
 The tests are organized to prove the RFC each package implements — a
 good way to learn the codebase is to read a package's `*_test.go`
-alongside its RFC. 89 test functions across 10 packages:
+alongside its RFC. 93 test functions across 10 packages:
 
 | Package | Implements | The tests prove |
 |---|---|---|
@@ -72,7 +72,7 @@ alongside its RFC. 89 test functions across 10 packages:
 | `internal/service` | RFC-004, 008, 012, 015, 017 | the shared CLI+API path end-to-end; shadow-agent (`agent.unregistered_ref`) observation; writ-gated spawn (template ceiling, TTL cap, refusal audit, lazy expiry + sweep); task-bound grants; lease mint/verify + revocation invalidates |
 | `internal/api` | RFC-008, 012, 014, 015 | httptest full flow, auth rejection, DENY-as-HTTP-200, terminality over the wire, token never in audit; tokenless writ-gated `/v1/spawn`; `/ui` serves data-free + writ tree endpoint omits JWS; `/v1/leases/verify` (fresh/revoked/garbage) |
 | `sdk` | RFC-010 | the Go SDK against a real control plane (advisory Guard/Guarded) |
-| `cmd/chancery` | RFC-005, 013, 016 | the `mcp wrap` binary driving real child MCP servers: mid-session revocation + audit integrity; browser e2e (sealed session file delivered server-side only, navigation allowed/denied, query strings kept out of audit); server pinning (pin on first wrap, drift refusal, audited repin) |
+| `cmd/chancery` | RFC-005, 013, 016 | the `mcp wrap` binary driving real child MCP servers: mid-session revocation + audit integrity; browser e2e (sealed session file delivered server-side only, navigation allowed/denied, query strings kept out of audit); server pinning (pin on first wrap, drift refusal, audited repin; tree pin catching a poisoned nested dependency; digest extraction + tier precedence units) |
 
 ## Repo layout
 

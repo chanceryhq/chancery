@@ -108,9 +108,12 @@ per-URL, in-path, fail-closed:
 ```
 
 The gate guards **both directions**. The callee side: the first wrap
-**pins** the server binary's hash and every later wrap refuses to
-start if it drifted ([RFC-016](rfcs/016-server-pinning.md)) —
-`chancery mcp repin` is the deliberate, audited upgrade path. The
+**pins** the server's identity — an `image@sha256:…` digest when you
+launch by container, the whole directory tree with `--pin-tree` (a
+poisoned `node_modules` file refuses to start), or the binary's hash
+by default — and every later wrap refuses on drift
+([RFC-016](rfcs/016-server-pinning.md)); `chancery mcp repin` is the
+deliberate, audited upgrade path. The
 caller side goes beyond capabilities when you want it to: grant with
 `--task "review PR #123"` and plug any external detector into the
 per-call decision (`--intent-check ./checker.sh` — veto-only,
@@ -141,7 +144,7 @@ any edit, deletion, or reorder. Known MVP gaps are published in
 
 - [**Quickstart (MCP)**](QUICKSTART.md) — govern the real filesystem MCP server in 5 minutes
 - [**Governing any agent**](docs/governing-any-agent.md) — the non-MCP path: identity, policy, revocation, audit for any job in any language
-- [**Testing playbook**](docs/testing-playbook.md) — one guided ~20-minute run through every feature (001–014), with expected output at each step
+- [**Testing playbook**](docs/testing-playbook.md) — one guided ~20-minute run through every feature (001–017), with expected output at each step
 - [**Verify every claim yourself**](docs/verify.md) — hands-on, by-hand checks that each RFC does what it says
 - [Concepts](docs/concepts.md) — agent, version, instance, writ
 - [**Browser agents**](examples/browser-agent/README.md) — custodied sessions + scoped navigation for Playwright MCP
@@ -158,7 +161,7 @@ a prompt-injected agent cannot talk its way around.
 ```sh
 git clone https://github.com/chanceryhq/chancery && cd chancery
 make build      # -> ./chancery  (Go 1.26+, no CGO, single static binary)
-make test       # go vet + 89 tests across 10 packages, in seconds
+make test       # go vet + 93 tests across 10 packages, in seconds
 make demo       # the 60-second enforcement + audit arc, end to end
 ```
 

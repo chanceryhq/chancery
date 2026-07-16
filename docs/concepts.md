@@ -105,12 +105,16 @@ boundaries (top-level `url` args, requested-URL only in MVP).
 
 Three newer concepts complete the per-call picture:
 
-- **Server pin (RFC-016).** The first `mcp wrap` records the server
-  binary's hash; every later wrap re-verifies and refuses to start on
+- **Server pin (RFC-016).** The first `mcp wrap` records the server's
+  identity; every later wrap re-verifies and refuses to start on
   drift. Permission is about the caller — the pin is about the callee.
-  Deliberate upgrades are `chancery mcp repin` (explicit, audited).
-  Honest limit: for `npx`-style launchers this pins the launcher, not
-  the package tree behind it.
+  Three tiers, strongest wins: a container **image digest** in the
+  server args (full filesystem), a **directory tree** via `--pin-tree`
+  (full dependency tree — catches a poisoned `node_modules` file the
+  binary hash can't see), or the **binary hash** by default. Deliberate
+  upgrades are `chancery mcp repin` (explicit, audited). Honest limit:
+  the *default* tier pins only the launcher for `npx`-style servers —
+  use `--pin-tree` or a digest there.
 - **Task (RFC-017).** `writ grant --task "review PR #123"` writes the
   grant's *purpose* onto the writ. It shows up in the audit trail and
   is handed to intent checkers — the one thing a checker can't infer.

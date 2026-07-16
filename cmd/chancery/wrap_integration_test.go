@@ -421,3 +421,91 @@ func TestServerPinDriftRefusalAndRepin(t *testing.T) {
 		t.Fatalf("wrap after repin must start cleanly: %v", err)
 	}
 }
+
+// T2 tree pinning (RFC-016): --pin-tree hashes the whole directory —
+// poisoning a nested "dependency" file (which T1 cannot see) makes the
+// next wrap refuse to start; repin --pin-tree is the deliberate path.
+func TestTreePinCatchesPoisonedDependency(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds subprocesses; skipped in -short")
+	}
+	ch := buildChancery(t)
+	data := t.TempDir()
+
+	// A server "install dir": the stub binary plus a fake dependency
+	// tree, mimicking a node_modules layout.
+	install := t.TempDir()
+	stub := buildStubServer(t)
+	raw, err := os.ReadFile(stub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binPath := filepath.Join(install, "server")
+	if err := os.WriteFile(binPath, raw, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dep := filepath.Join(install, "node_modules", "dep", "index.js")
+	if err := os.MkdirAll(filepath.Dir(dep), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dep, []byte("module.exports = 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runCLI(t, ch, data, "init", "--trust-domain", "acme.com")
+	runCLI(t, ch, data, "agent", "register", "tree-bot",
+		"--owner", "user:a@acme.com", "--purpose", "t", "--prompt", "p", "--model", "m")
+	grant := runCLI(t, ch, data, "writ", "grant", "--for", "user:a@acme.com",
+		"--to", "tree-bot", "--cap", "call:tree/*", "--ttl", "10m")
+	var wid string
+	for _, line := range strings.Split(grant, "\n") {
+		if strings.HasPrefix(line, "writ ") {
+			wid = strings.Fields(line)[1]
+		}
+	}
+
+	wrapArgs := []string{"mcp", "wrap", "--agent", "tree-bot", "--writ", wid,
+		"--server-name", "tree", "--pin-tree", install, "--", binPath}
+
+	// First wrap pins the tree.
+	w1 := exec.Command(ch, wrapArgs...)
+	w1.Env = append(os.Environ(), "CHANCERY_DATA="+data)
+	in1, _ := w1.StdinPipe()
+	if err := w1.Start(); err != nil {
+		t.Fatal(err)
+	}
+	in1.Close()
+	w1.Wait()
+	if !strings.Contains(runCLI(t, ch, data, "audit", "--limit", "20"), "tree:") {
+		t.Fatal("first wrap must record a tree-kind pin")
+	}
+
+	// Poison ONLY the nested dependency — the launched binary is
+	// untouched, so a T1 binary pin would pass. The tree pin must not.
+	if err := os.WriteFile(dep, []byte("module.exports = 666 // poisoned"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w2 := exec.Command(ch, wrapArgs...)
+	w2.Env = append(os.Environ(), "CHANCERY_DATA="+data)
+	out, err := w2.CombinedOutput()
+	if err == nil {
+		w2.Process.Kill()
+		t.Fatalf("poisoned dependency must refuse to start:\n%s", out)
+	}
+	if !strings.Contains(string(out), "drifted from its pin") {
+		t.Fatalf("expected tree drift refusal, got: %s", out)
+	}
+
+	// Deliberate accept: repin the tree, wrap starts again.
+	runCLI(t, ch, data, "mcp", "repin", "tree", "--pin-tree", install, "--", binPath)
+	w3 := exec.Command(ch, wrapArgs...)
+	w3.Env = append(os.Environ(), "CHANCERY_DATA="+data)
+	in3, _ := w3.StdinPipe()
+	if err := w3.Start(); err != nil {
+		t.Fatal(err)
+	}
+	in3.Close()
+	if err := w3.Wait(); err != nil {
+		t.Fatalf("wrap after tree repin must start cleanly: %v", err)
+	}
+}

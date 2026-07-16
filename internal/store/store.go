@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS writs (
 );
 CREATE TABLE IF NOT EXISTS server_pins (
 	namespace TEXT PRIMARY KEY,
+	kind TEXT NOT NULL DEFAULT 'binary',
 	path TEXT NOT NULL, sha256 TEXT NOT NULL,
 	created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
 );
@@ -196,6 +197,7 @@ func Open(path string) (*Store, error) {
 		`ALTER TABLE agents ADD COLUMN template TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE agents ADD COLUMN expires_at TIMESTAMP`,
 		`ALTER TABLE writs ADD COLUMN task TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE server_pins ADD COLUMN kind TEXT NOT NULL DEFAULT 'binary'`,
 	} {
 		if _, err := db.Exec(ddl); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return nil, fmt.Errorf("migrate: %w", err)
@@ -657,19 +659,33 @@ func (s *Store) CheckIssuable(instanceID string) (*Agent, *Version, *Instance, e
 // ServerPin records what code a wrapped MCP server namespace resolves
 // to. Wrap re-verifies before every spawn and refuses on drift; changing
 // a pin is an explicit, audited operator action (repin).
+//
+// Kind is the pinning tier (RFC-016): "binary" (T1, the resolved
+// executable's hash), "tree" (T2, Merkle hash of a whole directory —
+// full dependency tree), or "digest" (T3, a container image digest —
+// the full filesystem, enforced by the container runtime's
+// content-addressing).
 type ServerPin struct {
 	Namespace string
+	Kind      string
 	Path      string
 	SHA256    string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
+// Pin kinds (RFC-016 tiers).
+const (
+	PinBinary = "binary" // T1: hash of the resolved executable
+	PinTree   = "tree"   // T2: Merkle hash of a directory tree
+	PinDigest = "digest" // T3: container image digest
+)
+
 func (s *Store) GetServerPin(namespace string) (*ServerPin, error) {
 	p := &ServerPin{}
-	err := s.db.QueryRow(`SELECT namespace, path, sha256, created_at, updated_at
+	err := s.db.QueryRow(`SELECT namespace, kind, path, sha256, created_at, updated_at
 		FROM server_pins WHERE namespace = ?`, namespace).
-		Scan(&p.Namespace, &p.Path, &p.SHA256, &p.CreatedAt, &p.UpdatedAt)
+		Scan(&p.Namespace, &p.Kind, &p.Path, &p.SHA256, &p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: server pin %q", ErrNotFound, namespace)
 	}
@@ -678,12 +694,12 @@ func (s *Store) GetServerPin(namespace string) (*ServerPin, error) {
 
 // SetServerPin creates or replaces a namespace's pin (first wrap pins;
 // repin updates). The caller audits — pin changes are security events.
-func (s *Store) SetServerPin(namespace, path, sha string) error {
+func (s *Store) SetServerPin(namespace, kind, path, sha string) error {
 	now := time.Now().UTC()
-	_, err := s.db.Exec(`INSERT INTO server_pins (namespace, path, sha256, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(namespace) DO UPDATE SET path = excluded.path,
-			sha256 = excluded.sha256, updated_at = excluded.updated_at`,
-		namespace, path, sha, now, now)
+	_, err := s.db.Exec(`INSERT INTO server_pins (namespace, kind, path, sha256, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(namespace) DO UPDATE SET kind = excluded.kind,
+			path = excluded.path, sha256 = excluded.sha256, updated_at = excluded.updated_at`,
+		namespace, kind, path, sha, now, now)
 	return err
 }

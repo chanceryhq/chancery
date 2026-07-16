@@ -316,8 +316,27 @@ chancery mcp wrap --agent <a> --writ <w> --server-name pin-demo -- <server>
 cp /some/other/binary <server>     # swap the code behind the same name
 chancery mcp wrap --agent <a> --writ <w> --server-name pin-demo -- <server>
 # → error: server "pin-demo" drifted from its pin … refusing to start (fail closed)
-chancery audit --limit 5           # mcp.server_drift DENY, both hashes named
+chancery audit --limit 5           # mcp.server_drift DENY, both identities named
 chancery mcp repin pin-demo -- <server>   # the deliberate, audited upgrade
+```
+
+And the stronger tiers — the poisoned-dependency case the binary hash
+cannot see (T2), and image digests (T3):
+
+```sh
+# T2: pin the whole install dir. Then poison ONE nested file:
+chancery mcp wrap --agent <a> --writ <w> --server-name tree-demo \
+  --pin-tree /path/to/install -- /path/to/install/server
+echo "// poisoned" >> /path/to/install/node_modules/dep/index.js
+chancery mcp wrap --agent <a> --writ <w> --server-name tree-demo \
+  --pin-tree /path/to/install -- /path/to/install/server
+# → refuses: the launched binary is untouched, but the TREE drifted
+chancery mcp repin tree-demo --pin-tree /path/to/install -- /path/to/install/server
+
+# T3: launch by digest and the digest IS the pin — a retagged
+# image:latest can never impersonate it:
+chancery mcp wrap --agent <a> --writ <w> --server-name img-demo \
+  -- docker run -i --rm ghcr.io/acme/mcp@sha256:<digest>
 ```
 
 ## RFC-017 — The intent checker vetoes a technically-allowed call

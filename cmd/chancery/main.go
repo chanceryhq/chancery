@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -837,6 +836,7 @@ func mcpCmd() *cobra.Command {
 	var intentCheck, intentMode string
 	var intentTimeout time.Duration
 	var lease bool
+	var pinTree string
 	wrap := &cobra.Command{
 		Use:   "wrap --agent <name> --writ <id> -- <server command> [args...]",
 		Short: "Run an MCP server behind Chancery: per-call policy, audit, sealed secrets",
@@ -889,30 +889,35 @@ func mcpCmd() *cobra.Command {
 			if serverName == "" {
 				serverName = filepath.Base(args[0])
 			}
-			// Server pinning (RFC-016, T1): the wrap owns the spawn, so it
-			// verifies WHAT it is spawning. First wrap records the
-			// resolved binary's hash; every later wrap re-verifies and
-			// refuses on drift — fail closed, audited. Deliberate
-			// upgrades go through `chancery mcp repin`.
-			binPath, binSHA, err := resolveServerHash(args[0])
+			// Server pinning (RFC-016): the wrap owns the spawn, so it
+			// verifies WHAT it is spawning — by the strongest applicable
+			// tier (T3 image digest > T2 --pin-tree > T1 binary hash).
+			// First wrap records the identity; every later wrap
+			// re-verifies and refuses on drift — fail closed, audited.
+			// Deliberate upgrades go through `chancery mcp repin`.
+			pinKind, pinPath, pinSHA, err := resolvePinIdentity(args, pinTree)
 			if err != nil {
-				return fmt.Errorf("cannot hash server binary: %w", err)
+				return fmt.Errorf("cannot resolve server identity: %w", err)
 			}
 			if pin, err := e.st.GetServerPin(serverName); err == nil {
-				if pin.SHA256 != binSHA {
+				if pin.Kind != pinKind || pin.SHA256 != pinSHA {
 					e.st.Audit(store.AuditEvent{Event: "mcp.server_drift", AgentID: a.ID,
 						WritID: writID, Resource: serverName, Decision: "DENY",
 						Reason: fmt.Sprintf("pinned=%s found=%s path=%s — refuse to start; `chancery mcp repin %s -- <cmd>` after a deliberate upgrade",
-							pin.SHA256[:16], binSHA[:16], binPath, serverName)})
-					return fmt.Errorf("server %q drifted from its pin (pinned %s…, found %s…): refusing to start (fail closed) — after a deliberate upgrade run: chancery mcp repin %s -- %s",
-						serverName, pin.SHA256[:16], binSHA[:16], serverName, strings.Join(args, " "))
+							pinDescribe(pin.Kind, pin.SHA256), pinDescribe(pinKind, pinSHA), pinPath, serverName)})
+					repinHint := "chancery mcp repin " + serverName
+					if pinTree != "" {
+						repinHint += " --pin-tree " + pinTree
+					}
+					return fmt.Errorf("server %q drifted from its pin (pinned %s…, found %s…): refusing to start (fail closed) — after a deliberate upgrade run: %s -- %s",
+						serverName, pinDescribe(pin.Kind, pin.SHA256), pinDescribe(pinKind, pinSHA), repinHint, strings.Join(args, " "))
 				}
 			} else if errors.Is(err, store.ErrNotFound) {
-				if err := e.st.SetServerPin(serverName, binPath, binSHA); err != nil {
+				if err := e.st.SetServerPin(serverName, pinKind, pinPath, pinSHA); err != nil {
 					return err
 				}
 				e.st.Audit(store.AuditEvent{Event: "mcp.server_pin", AgentID: a.ID,
-					Resource: serverName, Reason: fmt.Sprintf("sha256=%s path=%s", binSHA[:16], binPath)})
+					Resource: serverName, Reason: fmt.Sprintf("%s path=%s", pinDescribe(pinKind, pinSHA), pinPath)})
 			} else {
 				return err
 			}
@@ -1089,9 +1094,12 @@ func mcpCmd() *cobra.Command {
 		"per-call budget for the intent checker")
 	wrap.Flags().BoolVar(&lease, "lease", false,
 		"stamp admitted calls with a capability lease in params._meta (RFC-015; cooperating servers verify via POST /v1/leases/verify)")
+	wrap.Flags().StringVar(&pinTree, "pin-tree", "",
+		"pin the whole directory tree (RFC-016 T2): Merkle hash of every file; any change refuses to start")
 	wrap.MarkFlagRequired("agent")
 	wrap.MarkFlagRequired("writ")
 
+	var repinTree string
 	repin := &cobra.Command{
 		Use:   "repin <namespace> -- <server command> [args...]",
 		Short: "Re-pin a wrapped server after a deliberate upgrade (RFC-016) — explicit, audited",
@@ -1103,51 +1111,28 @@ func mcpCmd() *cobra.Command {
 			}
 			defer e.st.Close()
 			ns := args[0]
-			binPath, binSHA, err := resolveServerHash(args[1])
+			kind, path, sha, err := resolvePinIdentity(args[1:], repinTree)
 			if err != nil {
-				return fmt.Errorf("cannot hash server binary: %w", err)
+				return fmt.Errorf("cannot resolve server identity: %w", err)
 			}
 			old := "(none)"
 			if pin, err := e.st.GetServerPin(ns); err == nil {
-				old = pin.SHA256[:16]
+				old = pinDescribe(pin.Kind, pin.SHA256)
 			}
-			if err := e.st.SetServerPin(ns, binPath, binSHA); err != nil {
+			if err := e.st.SetServerPin(ns, kind, path, sha); err != nil {
 				return err
 			}
 			e.st.Audit(store.AuditEvent{Event: "mcp.server_repin", Resource: ns,
-				Reason: fmt.Sprintf("old=%s new=%s path=%s", old, binSHA[:16], binPath)})
-			fmt.Printf("repinned %s\n  path   %s\n  sha256 %s (was %s)\n", ns, binPath, binSHA[:16], old)
+				Reason: fmt.Sprintf("old=%s new=%s path=%s", old, pinDescribe(kind, sha), path)})
+			fmt.Printf("repinned %s\n  path   %s\n  identity %s (was %s)\n", ns, path, pinDescribe(kind, sha), old)
 			return nil
 		},
 	}
+	repin.Flags().StringVar(&repinTree, "pin-tree", "",
+		"re-pin as a directory tree (RFC-016 T2)")
 
 	cmd.AddCommand(wrap, repin)
 	return cmd
-}
-
-// resolveServerHash resolves a server command on PATH and returns the
-// binary's path and SHA-256 (RFC-016 T1). Honest limit, documented: for
-// interpreter launchers (npx, uvx, docker) this pins the LAUNCHER, not
-// the package tree behind it — full-tree coverage needs a frozen
-// install or an image digest (RFC-016 phases 2–3).
-func resolveServerHash(cmd string) (string, string, error) {
-	path, err := exec.LookPath(cmd)
-	if err != nil {
-		return "", "", err
-	}
-	if abs, err := filepath.EvalSymlinks(path); err == nil {
-		path = abs
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return "", "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", "", err
-	}
-	return path, hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func secretCmd() *cobra.Command {

@@ -1,4 +1,4 @@
-# RFC-016: Server Pinning (Callee Trust, Phase 1)
+# RFC-016: Server Pinning (Callee Trust)
 
 - **Status:** In Review
 - **Author:** Aneesh Gupta
@@ -42,21 +42,23 @@ to.
 
 ## 4. Decision
 
-- **First wrap pins:** the server command is resolved on PATH
-  (symlinks followed) and its SHA-256 recorded against the
-  `--server-name` namespace (`mcp.server_pin` audited).
-- **Every later wrap re-verifies before spawning.** Hash mismatch →
-  refuse to start, fail closed, audit `mcp.server_drift` with expected
-  and found hashes.
-- **Deliberate upgrades are explicit:** `chancery mcp repin <ns> --
-  <cmd>` re-hashes and updates the pin, audited as `mcp.server_repin`
-  with old→new. Pins are operator-owned, like allow-lists.
+A pin is a **(kind, identity)** pair per `--server-name` namespace,
+recorded at first wrap (`mcp.server_pin` audited), re-verified **before
+every spawn**, refused on any mismatch (fail closed,
+`mcp.server_drift` with expected and found identities), and changed
+only by `chancery mcp repin <ns> -- <cmd>` — explicit, operator-owned,
+audited as `mcp.server_repin` with old→new.
 
-This is **T1 of three tiers**. T2 (Chancery-managed frozen installs,
-whole-tree hashes) and T3 (container image digests + manifest-bounded
-runtime confinement: egress allow-lists, read-only FS) are specified in
-the tracking issue and deferred — they change the operational model and
-deserve their own RFC when a consumer exists.
+Three kinds; the strongest applicable wins automatically:
+
+| Tier | Kind | Identity | When |
+|---|---|---|---|
+| T3 | `digest` | the container image digest in the server args (`image@sha256:…`) | auto-detected: a digest-pinned image reference is already a full-filesystem content address; Chancery makes it a refusal boundary instead of a convention. Mutable tags (`:latest`) are NOT identities. |
+| T2 | `tree` | Merkle hash of a whole directory (`--pin-tree <dir>`): every file's relative path, executability, and content hash | the operator points at the server's install dir — closes the transitive-dependency hole for `npx`/`uvx`-style servers |
+| T1 | `binary` | SHA-256 of the resolved executable (symlinks followed) | default when neither of the above applies |
+
+A kind change (e.g. a binary-pinned namespace suddenly launched from a
+container) is drift too — identity includes how it was measured.
 
 ## 5. Why
 
@@ -67,10 +69,18 @@ one (refuse + audit, never silently proceed).
 
 ## 6. Trade-offs accepted
 
-- **T1 is honest but shallow for interpreter launchers.** Hashing
-  `npx` pins the launcher binary, not the package tree behind it — a
-  poisoned transitive dependency walks straight through. The docs say
-  this loudly; full-tree coverage is T2/T3.
+- **The default (T1) is honest but shallow for interpreter
+  launchers.** Hashing `npx` pins the launcher binary, not the package
+  tree behind it — a poisoned transitive dependency walks straight
+  through unless the operator opts into `--pin-tree` or launches by
+  image digest. The gap stays documented (G13) because it is the
+  *default's* gap, not the feature's.
+- T2 re-hashes the whole tree at every wrap start — a
+  `node_modules`-sized dir costs a moment at spawn time. Deliberate:
+  spawn is rare, drift is expensive.
+- T3 trusts the container runtime's digest enforcement and the image
+  registry's content-addressing; Chancery verifies the *reference*,
+  the runtime verifies the bytes.
 - Auto-pin on first wrap trusts first use (TOFU). The alternative —
   mandatory explicit pinning — adds a step to every quickstart for
   protection most users would skip entirely.
@@ -96,9 +106,20 @@ audit event carries hashes and path only, never arguments or content.
 
 ## 9. What gets built (MVP, this RFC)
 
-- `server_pins` table; `GetServerPin`/`SetServerPin`.
-- Pin/verify/refuse logic in `mcp wrap`; `chancery mcp repin`.
+- `server_pins` table (namespace, kind, path, sha256);
+  `GetServerPin`/`SetServerPin`.
+- Tiered identity resolution (digest > tree > binary); pin/verify/
+  refuse logic in `mcp wrap`; `--pin-tree` on wrap and repin;
+  `chancery mcp repin`.
 - Audit events `mcp.server_pin`, `mcp.server_drift`,
-  `mcp.server_repin`.
-- Integration test: pin on first wrap → swap binary → wrap refuses +
-  audits → repin → wrap starts.
+  `mcp.server_repin` (all carrying `kind:hash…`).
+- Tests: digest extraction (mutable tags rejected); tree hash detects
+  content change / added file / executability flip in nested deps;
+  tier precedence; integration — binary swap refused + repin; poisoned
+  `node_modules` file (invisible to T1) refused under `--pin-tree` +
+  tree repin.
+
+**Deferred to follow-up (issue #5):** `chancery mcp install`
+(Chancery-managed frozen installs — convenience over T2's primitive)
+and manifest-bounded runtime confinement (egress allow-lists,
+read-only FS) — a different operational model deserving its own RFC.
