@@ -14,6 +14,30 @@ stored.
 Single Go binary. Apache-2.0. MCP-first, then HTTP, shell, browser.
 Try the 60-second story: `make demo`.
 
+**What you get today:**
+
+- **Identity** — agent → immutable version → revocable instance;
+  SPIFFE-compatible URIs; registry-born, owner-attributed (RFC-001)
+- **Writs** — delegated authority that can only narrow: the block
+  format has no field for widening (RFC-002)
+- **In-path enforcement** — `mcp wrap` checks every tool call against
+  fresh state; revocation lands on the *next call*, not the next
+  token expiry (RFC-005/007)
+- **Sealed credentials** — injected into the tool server's env, never
+  the agent's context; prompt injection can't leak what was never
+  there (RFC-003)
+- **Runtime spawn** — orchestrators mint governed workers without the
+  admin token, bounded by human-locked templates (RFC-012)
+- **Browser sessions** — custodied cookies + per-URL navigation
+  scoping (RFC-013)
+- **Callee trust** — server pinning with drift refusal, frozen
+  tree-pinned installs, and OS-level confinement (RFC-016/018)
+- **Per-call semantics** — task-bound grants, a pluggable intent
+  checker, capability leases, admitted-vs-committed audit
+  (RFC-015/017)
+- **Tamper-evident audit** — hash-chained, metadata-only by schema;
+  plus a read-only dashboard at `/ui` (RFC-006/014)
+
 ![Chancery demo: grant, allow, revoke, deny, tamper-evident audit](demo/chancery-demo.gif)
 
 **MCP-first, not MCP-only.** The registry, writs/delegation, policy,
@@ -65,6 +89,8 @@ Every action is attributed to a specific agent, version, and delegation
 chain — and a delegated writ can only ever narrow: the block format has
 no field for widening.
 
+### Spawn agents at runtime — governed, no admin token
+
 Orchestrators that **create agents at runtime** don't need the admin
 token: spawning is itself writ-governed
 ([RFC-012](rfcs/012-dynamic-agent-creation.md)). A human locks a
@@ -82,8 +108,10 @@ on its own:
     --template researcher --ttl 10m      # or POST /v1/spawn — no admin token
 ```
 
-Enforce it live on any stdio MCP server (per-call policy, sealed
-secrets injected server-side only, revocation on the next call):
+### Enforce it live on any stdio MCP server
+
+Per-call policy, sealed secrets injected server-side only, revocation
+on the next call:
 
 ```sh
 ./chancery secret put github-token --from-file ./token
@@ -91,10 +119,12 @@ secrets injected server-side only, revocation on the next call):
     --secret GITHUB_TOKEN=github-token -- npx @yourorg/some-mcp-server
 ```
 
-**Browser agents** ([RFC-013](rfcs/013-browser-sessions-and-tokens.md)):
-the human's session is sealed and custodied — the agent never holds a
+### Browser agents: custodied sessions, scoped navigation
+
+The human's session is sealed and custodied — the agent never holds a
 cookie — and granting `net:…` capabilities scopes every navigation
-per-URL, in-path, fail-closed:
+per-URL, in-path, fail-closed
+([RFC-013](rfcs/013-browser-sessions-and-tokens.md)):
 
 ```sh
 ./chancery secret put github-session --from-file storage-state.json
@@ -107,31 +137,64 @@ per-URL, in-path, fail-closed:
 # instance revoke is the session kill switch. See examples/browser-agent.
 ```
 
-The gate guards **both directions**. The callee side: the first wrap
-**pins** the server's identity — an `image@sha256:…` digest when you
-launch by container, the whole directory tree with `--pin-tree` (a
-poisoned `node_modules` file refuses to start), or the binary's hash
-by default — and every later wrap refuses on drift
-([RFC-016](rfcs/016-server-pinning.md)); `chancery mcp repin` is the
-deliberate, audited upgrade path. Skip `npx` entirely with
-`chancery mcp install <pkg>@<version>`: a frozen, scripts-disabled
-install that is tree-pinned automatically
-([RFC-018](rfcs/018-frozen-installs-and-confinement.md)) — and go
-further with `mcp wrap --confine`, which turns the pin's manifest
-(`--egress` hosts, `--writable` paths) into an OS boundary: an
-auditing egress allow-list proxy plus a read-only-outside-the-manifest
-sandbox, refusing to spawn rather than ever running unconfined.
-`mcp wrap --dry-run` preflights all of it without spawning anything. The
-caller side goes beyond capabilities when you want it to: grant with
-`--task "review PR #123"` and plug any external detector into the
-per-call decision (`--intent-check ./checker.sh` — veto-only,
-advise-or-enforce, arguments never stored;
-[RFC-017](rfcs/017-intent-socket.md)). And `--lease` stamps every
-admitted call with a short-lived signed lease a cooperating server
-verifies via `POST /v1/leases/verify` right before committing — so a
-revocation that lands mid-flight fails at the server instead of
-landing ([RFC-015](rfcs/015-call-lifecycle-and-leases.md)). The audit
-trail distinguishes admitted from committed either way.
+### Trust the server, not just the agent
+
+Permission is about the caller; the gate also verifies the **callee**.
+The first wrap **pins** the server's identity and every later wrap
+refuses on drift ([RFC-016](rfcs/016-server-pinning.md)) — three
+tiers, strongest wins: an `image@sha256:…` digest in the command, a
+whole directory tree via `--pin-tree`, or the binary's hash by
+default. Better: skip `npx` entirely
+([RFC-018](rfcs/018-frozen-installs-and-confinement.md)) —
+
+```sh
+./chancery mcp install @yourorg/some-mcp-server@1.4.2 \
+    --egress api.github.com --writable /tmp/agent-scratch
+# frozen install, lifecycle scripts disabled, whole tree Merkle-pinned;
+# mutable specs (latest, ^, ~) refused — a mutable reference is not an identity.
+# Poison ONE file in it and the next wrap refuses to start.
+```
+
+and turn the pin's manifest into an **OS boundary** with `--confine`:
+outbound network goes loopback-only through an auditing egress
+allow-list proxy (off-manifest hosts are a 403 +
+`mcp.server_egress_denied` — host recorded, never paths), and the
+filesystem is read-only outside the declared writable paths. Where the
+sandbox layer is missing, the spawn **refuses** — never silently
+unconfined. Upgrades and manifest changes go through
+`chancery mcp repin`: explicit, audited. And
+`mcp wrap --dry-run` preflights all of it — effective authority, pin
+status, manifest — spawning nothing, pinning nothing.
+
+### Beyond capabilities: the task, the moment, the commit
+
+Capabilities say what's *allowed*; three per-call mechanisms narrow
+that to what's *intended* and record what *happened*:
+
+```sh
+./chancery writ grant --for user:you@acme.com --to db-bot \
+    --cap "call:db/*" --task "read this week's metrics"
+./chancery mcp wrap --agent db-bot --writ <writ-id> \
+    --intent-check ./checker.sh --lease -- <db-mcp-server>
+```
+
+- **Task-bound grants** ([RFC-017](rfcs/017-intent-socket.md)):
+  `--task` writes the grant's *purpose* onto the writ — audited, and
+  handed to intent checkers as the one thing they can't infer.
+- **The intent socket** (RFC-017): plug any external detector into the
+  per-call decision. It sees `{agent, task, tool, args}` and votes —
+  veto-only (it can never widen), fail-closed in `enforce`, log-only
+  in `advise`, arguments never stored. Chancery ships no semantic
+  judgment; it makes yours enforceable.
+- **Capability leases**
+  ([RFC-015](rfcs/015-call-lifecycle-and-leases.md)): `--lease` stamps
+  each admitted call with a 30-second signed lease a cooperating
+  server verifies (`POST /v1/leases/verify`) right before committing —
+  a revocation landing mid-flight fails at the server instead of
+  landing. Either way the trail records `mcp.call_result`: "allowed"
+  and "happened" are different facts.
+
+### The control plane: API + read-only dashboard
 
 Run the control plane as an HTTP API with `./chancery serve`
 (REST/JSON under `/v1`; the admin token is printed once at `init`) —
@@ -200,6 +263,6 @@ Design happens as a series of locked decisions, one RFC at a time
 | [013](rfcs/013-browser-sessions-and-tokens.md) | Browser sessions and tokens as governed credentials | In Review |
 | [014](rfcs/014-read-only-dashboard.md) | Read-only dashboard (`/ui`) | In Review |
 | [015](rfcs/015-call-lifecycle-and-leases.md) | Call lifecycle and capability leases | In Review |
-| [016](rfcs/016-server-pinning.md) | Server pinning (callee trust, phase 1) | In Review |
+| [016](rfcs/016-server-pinning.md) | Server pinning (callee identity: binary, tree, digest) | In Review |
 | [017](rfcs/017-intent-socket.md) | Task-bound grants and the intent socket | In Review |
 | [018](rfcs/018-frozen-installs-and-confinement.md) | Frozen installs and manifest-bounded confinement | In Review |
