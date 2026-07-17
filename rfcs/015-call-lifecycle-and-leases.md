@@ -124,3 +124,23 @@ operation they are about to commit.
 - `POST /v1/leases/verify` → `{valid, reason, resource}`.
 - Tests: mint/verify/revoke-invalidates; tampered lease; stamped frame
   reaches the server with arguments intact; lifecycle events audited.
+
+## 10. Amendment (2026-07-17): audit cross-references (issue #6)
+
+The lease-verify callback is the one moment two audit chains describe
+the same event — Chancery's authority chain and the tool's own content
+chain (the composition Perseus Vault surfaced). `POST /v1/leases/verify`
+therefore accepts an optional `xref` field, `<system>:<opaque-id>`
+(system `[a-z0-9_-]{1,32}`, id 1–128 printable chars). On a VALID
+lease it is recorded as an `mcp.call_xref` audit event carrying the
+lease's writ, agent, and resource plus the opaque foreign id.
+
+Locked properties: the id is **opaque** — Chancery attests its own
+chain, not the foreign one; it is an identifier, never content
+(metadata-only stands); an invalid lease records nothing (it attests
+nothing); malformed xrefs are a 400, not a silent drop; and neither
+chain depends on the other to function — the reference is an
+annotation. The reverse direction needs no Chancery plumbing at all:
+the cooperating server reads `wid`/`blk` out of the lease it already
+holds and records them in its own trail. Tested:
+`TestLeaseXrefRecorded`.

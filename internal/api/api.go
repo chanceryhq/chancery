@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -536,9 +537,16 @@ func (s *Server) auditVerify(w http.ResponseWriter, r *http.Request) {
 // immediately before committing a side effect. valid=false means the
 // authority was revoked (or the lease expired) after the call was
 // admitted — the server should refuse to commit.
+// xrefRe validates an audit cross-reference: <system>:<opaque-id>
+// (issue #6). The id is opaque by design — Chancery attests its own
+// chain, not the foreign one — so the only constraints are shape and
+// size: it must be an identifier, never content.
+var xrefRe = regexp.MustCompile(`^[a-z0-9_-]{1,32}:[!-~]{1,128}$`)
+
 func (s *Server) verifyLease(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Lease string `json:"lease"`
+		Xref  string `json:"xref"`
 	}
 	if err := decode(r, &req); err != nil {
 		fail(w, err)
@@ -548,7 +556,30 @@ func (s *Server) verifyLease(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, apiError{"lease is required", "invalid"})
 		return
 	}
-	resource, reason, valid := s.Svc.VerifyLease(req.Lease)
+	if req.Xref != "" && !xrefRe.MatchString(req.Xref) {
+		writeJSON(w, http.StatusBadRequest,
+			apiError{"xref must be <system>:<opaque-id> (system: [a-z0-9_-]{1,32}; id: 1-128 printable chars)", "invalid"})
+		return
+	}
+	info, reason, valid := s.Svc.VerifyLease(req.Lease)
+	resource := ""
+	if valid {
+		resource = info.Resource
+		// Audit cross-reference (issue #6): a cooperating server hands
+		// back its own chain's id at the moment it verifies the lease —
+		// the one moment both chains describe the same event. Recorded
+		// only for VALID leases (an invalid lease attests nothing) and
+		// stored opaque: neither chain depends on the other to function.
+		if req.Xref != "" {
+			var agentID string
+			if a, err := s.Svc.St.GetAgentByName(info.Agent); err == nil {
+				agentID = a.ID
+			}
+			s.Svc.St.Audit(store.AuditEvent{Event: "mcp.call_xref", AgentID: agentID,
+				WritID: info.Writ, Verb: "call", Resource: info.Resource,
+				Reason: "xref=" + req.Xref})
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"valid": valid, "reason": reason, "resource": resource,
 	})

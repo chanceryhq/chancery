@@ -405,3 +405,86 @@ func TestLeaseVerifyOverHTTP(t *testing.T) {
 		t.Errorf("garbage lease: want 200+invalid, got %d %v", code, out)
 	}
 }
+
+// TestLeaseXrefRecorded (issue #6): a cooperating server hands back its
+// own audit chain's id at lease-verify time; Chancery records it as
+// mcp.call_xref — opaque, only for valid leases, shape-checked.
+func TestLeaseXrefRecorded(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "chancery.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	iss, err := identity.LoadOrCreate(dir, "acme.com", "https://chancery.acme.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &service.Service{St: st, Iss: iss}
+	sum := sha256.Sum256([]byte(testToken))
+	ts := httptest.NewServer((&Server{Svc: svc, AdminTokenHash: hex.EncodeToString(sum[:])}).Handler())
+	t.Cleanup(ts.Close)
+
+	if _, _, err := svc.RegisterAgent("xref-bot", "user:a@acme.com", "t", "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	wid, blk, err := svc.GrantWrit("user:a@acme.com", "xref-bot",
+		[]string{"call:vault/*"}, time.Hour, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := svc.MintLease(wid, blk, "xref-bot", "vault/read")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Valid lease + well-formed xref: verified AND cross-referenced.
+	code, out := call(t, ts, "POST", "/v1/leases/verify", testToken,
+		map[string]any{"lease": lease, "xref": "perseus:sha256-deadbeef01"})
+	var valid bool
+	json.Unmarshal(out["valid"], &valid)
+	if code != 200 || !valid {
+		t.Fatalf("valid lease with xref must verify: %d %v", code, out)
+	}
+	events, err := st.AuditTimeline(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ev := range events {
+		if ev.Event == "mcp.call_xref" {
+			found = true
+			if ev.WritID != wid || ev.Resource != "vault/read" ||
+				!strings.Contains(ev.Reason, "xref=perseus:sha256-deadbeef01") {
+				t.Fatalf("xref event misattributed: %+v", ev)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no mcp.call_xref event recorded")
+	}
+
+	// Malformed xref: 400, nothing recorded.
+	code, _ = call(t, ts, "POST", "/v1/leases/verify", testToken,
+		map[string]any{"lease": lease, "xref": "no colon here"})
+	if code != 400 {
+		t.Fatalf("malformed xref: want 400, got %d", code)
+	}
+
+	// Invalid lease + xref: an invalid lease attests nothing — no event.
+	before, _ := st.AuditTimeline(50)
+	call(t, ts, "POST", "/v1/leases/verify", testToken,
+		map[string]any{"lease": "junk", "xref": "perseus:abc"})
+	after, _ := st.AuditTimeline(50)
+	nXref := func(evs []store.AuditEvent) (n int) {
+		for _, ev := range evs {
+			if ev.Event == "mcp.call_xref" {
+				n++
+			}
+		}
+		return
+	}
+	if nXref(after) != nXref(before) {
+		t.Fatal("xref recorded for an invalid lease")
+	}
+}

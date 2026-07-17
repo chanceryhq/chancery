@@ -50,13 +50,22 @@ func (s *Service) MintLease(widID, blockID, agentName, resource string) (string,
 	return tok.SignedString(s.Iss.Key())
 }
 
+// LeaseInfo is what a verified lease attests to: this agent, on this
+// resource, under this writ block, was admitted by the gate.
+type LeaseInfo struct {
+	Writ     string
+	Block    string
+	Agent    string
+	Resource string
+}
+
 // VerifyLease checks a lease's signature and expiry, then re-checks the
 // underlying writ/block liveness in the registry — a lease minted
 // before a revocation fails here, mid-flight. Returns the reason a
-// lease is invalid; valid leases return ("", true) plus the resource
-// the lease was minted for (the server should match it against the
-// operation it is about to commit).
-func (s *Service) VerifyLease(lease string) (resource, reason string, valid bool) {
+// lease is invalid; valid leases return ("", true) plus the lease's
+// claims (the server should match Resource against the operation it is
+// about to commit).
+func (s *Service) VerifyLease(lease string) (info *LeaseInfo, reason string, valid bool) {
 	var claims leaseClaims
 	_, err := jwt.ParseWithClaims(lease, &claims, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodECDSA); !ok {
@@ -66,18 +75,19 @@ func (s *Service) VerifyLease(lease string) (resource, reason string, valid bool
 	}, jwt.WithExpirationRequired())
 	if err != nil {
 		if errors.Is(err, jwt.ErrTokenExpired) {
-			return "", "lease expired", false
+			return nil, "lease expired", false
 		}
-		return "", "lease invalid: " + err.Error(), false
+		return nil, "lease invalid: " + err.Error(), false
 	}
 	// Liveness re-check: revocation of the writ, the block, or anything
 	// on its path since minting invalidates the lease (RFC-015).
 	path, err := s.St.Path(claims.Block)
 	if err != nil {
-		return "", "authority revoked since minting: " + err.Error(), false
+		return nil, "authority revoked since minting: " + err.Error(), false
 	}
 	if path[0].WritID != claims.Writ {
-		return "", "lease block does not belong to lease writ", false
+		return nil, "lease block does not belong to lease writ", false
 	}
-	return claims.Resource, "", true
+	return &LeaseInfo{Writ: claims.Writ, Block: claims.Block,
+		Agent: claims.Agent, Resource: claims.Resource}, "", true
 }

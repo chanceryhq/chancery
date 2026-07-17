@@ -59,7 +59,7 @@ work end to end, and it's what the README's "60-second story" refers to.
 
 The tests are organized to prove the RFC each package implements — a
 good way to learn the codebase is to read a package's `*_test.go`
-alongside its RFC. 104 test functions across 11 packages:
+alongside its RFC. 105 test functions across 11 packages:
 
 | Package | Implements | The tests prove |
 |---|---|---|
@@ -70,7 +70,7 @@ alongside its RFC. 104 test functions across 11 packages:
 | `internal/seal` | RFC-003 | AEAD roundtrip, no plaintext on disk, name-bound (cross-name swap rejected), wrong-key/tamper fail-closed |
 | `internal/mcp` | RFC-005, 013, 015, 017 | tools/call allow/deny, tools/list filtering, malformed-frame handling, deny-on-audit-failure; URL guard (`URLToResource` strictness, per-navigation allow/deny, fail-closed schemes, guard-off compatibility); intent socket (veto, advise, fail-closed checker failure, context contract, args never audited); call lifecycle (`mcp.call_result`) + lease stamping into `_meta` |
 | `internal/service` | RFC-004, 008, 012, 015, 017 | the shared CLI+API path end-to-end; shadow-agent (`agent.unregistered_ref`) observation; writ-gated spawn (template ceiling, TTL cap, refusal audit, lazy expiry + sweep); task-bound grants; lease mint/verify + revocation invalidates |
-| `internal/api` | RFC-008, 012, 014, 015 | httptest full flow, auth rejection, DENY-as-HTTP-200, terminality over the wire, token never in audit; tokenless writ-gated `/v1/spawn`; `/ui` serves data-free + writ tree endpoint omits JWS; `/v1/leases/verify` (fresh/revoked/garbage) |
+| `internal/api` | RFC-008, 012, 014, 015 | httptest full flow, auth rejection, DENY-as-HTTP-200, terminality over the wire, token never in audit; tokenless writ-gated `/v1/spawn`; `/ui` serves data-free + writ tree endpoint omits JWS; `/v1/leases/verify` (fresh/revoked/garbage) + audit cross-references (`mcp.call_xref`: recorded opaque for valid leases only, malformed = 400) |
 | `internal/confine` | RFC-018 | egress host matching (exact + wildcard, case/FQDN-normalized), allow + deny proxy paths against real local servers, deny-hook reports host only, sandbox profile rendering |
 | `sdk` | RFC-010 | the Go SDK against a real control plane (advisory Guard/Guarded) |
 | `cmd/chancery` | RFC-005, 013, 016, 018 | the `mcp wrap` binary driving real child MCP servers: mid-session revocation + audit integrity; browser e2e (sealed session file delivered server-side only, navigation allowed/denied, query strings kept out of audit); server pinning (pin on first wrap, drift refusal, audited repin; tree pin catching a poisoned nested dependency; digest extraction + tier precedence units); frozen installs (mutable-spec refusal, install→pin→poison→refusal e2e), `--dry-run` side-effect-freedom, and confinement against the real OS sandbox (filesystem + network boundary, wrap e2e with audited egress denial) |

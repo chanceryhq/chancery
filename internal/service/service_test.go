@@ -380,9 +380,9 @@ func TestLeaseMintVerifyAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, reason, valid := s.VerifyLease(lease)
-	if !valid || res != "stub/echo" {
-		t.Fatalf("fresh lease must verify (valid=%v reason=%q res=%q)", valid, reason, res)
+	info, reason, valid := s.VerifyLease(lease)
+	if !valid || info.Resource != "stub/echo" || info.Writ != wid || info.Agent != "lease-bot" {
+		t.Fatalf("fresh lease must verify with full claims (valid=%v reason=%q info=%+v)", valid, reason, info)
 	}
 	// Tampered lease: flip a byte in the signature.
 	bad := lease[:len(lease)-2] + "xx"

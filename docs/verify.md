@@ -308,6 +308,20 @@ no expiry wait. And the trail now separates "admitted" from
 "committed": `mcp.call_result` is the difference between allowed and
 happened.
 
+A cooperating server with its own audit chain can cross-reference the
+two at verify time (RFC-015 §10): pass `"xref":"<system>:<opaque-id>"`
+alongside the lease and, on a valid lease, the trail gains an
+`mcp.call_xref` event tying this call's writ and resource to the
+foreign chain's id — opaque, metadata-only, refused with a 400 if
+malformed:
+
+```sh
+curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  -d "{\"lease\":\"$LEASE\",\"xref\":\"perseus:sha256-<their-audit-hash>\"}" \
+  http://127.0.0.1:7423/v1/leases/verify
+chancery audit --limit 3           # mcp.call_xref  call:<ns>/<tool>  xref=perseus:…
+```
+
 ## RFC-016 — A drifted server refuses to start
 
 ```sh

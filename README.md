@@ -233,7 +233,7 @@ a prompt-injected agent cannot talk its way around.
 ```sh
 git clone https://github.com/chanceryhq/chancery && cd chancery
 make build      # -> ./chancery  (Go 1.26+, no CGO, single static binary)
-make test       # go vet + 104 tests across 11 packages, in seconds
+make test       # go vet + 105 tests across 11 packages, in seconds
 make demo       # the 60-second enforcement + audit arc, end to end
 ```
 
