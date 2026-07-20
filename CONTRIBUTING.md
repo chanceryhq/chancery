@@ -59,7 +59,7 @@ work end to end, and it's what the README's "60-second story" refers to.
 
 The tests are organized to prove the RFC each package implements — a
 good way to learn the codebase is to read a package's `*_test.go`
-alongside its RFC. 105 test functions across 11 packages:
+alongside its RFC. 109 test functions across 11 packages:
 
 | Package | Implements | The tests prove |
 |---|---|---|

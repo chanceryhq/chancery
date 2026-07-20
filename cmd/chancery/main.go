@@ -889,6 +889,7 @@ func mcpCmd() *cobra.Command {
 	var lease bool
 	var pinTree string
 	var confineOn, dryRun bool
+	var runAs string
 	var egressHosts, writablePaths []string
 	wrap := &cobra.Command{
 		Use:   "wrap --agent <name> --writ <id> -- <server command> [args...]",
@@ -1009,6 +1010,16 @@ func mcpCmd() *cobra.Command {
 				return err
 			}
 
+			// Privilege separation (SECURITY.md G17): resolve the child's
+			// credential BEFORE materializing secrets, so sealed files can
+			// be handed to the right owner as they are written.
+			runAsCred, runAsDesc, err := runAsCredential(runAs)
+			if err != nil {
+				e.st.Audit(store.AuditEvent{Event: "mcp.run_as_refused", AgentID: a.ID,
+					Resource: serverName, Decision: "DENY", Reason: err.Error()})
+				return err
+			}
+
 			// Scrubbed child env: baseline + sealed secrets only. The
 			// agent-side process tree never holds a real credential.
 			childEnv := []string{}
@@ -1044,6 +1055,11 @@ func mcpCmd() *cobra.Command {
 						return err
 					}
 					defer os.RemoveAll(runDir)
+					// Under --run-as the server is a different user, so it
+					// must own the run dir to read what we put there.
+					if err := chownForChild(runDir, runAsCred); err != nil {
+						return fmt.Errorf("run dir for %s: %w", runAsDesc, err)
+					}
 					for _, m := range secretFileMaps {
 						key, name, ok := strings.Cut(m, "=")
 						if !ok {
@@ -1056,6 +1072,9 @@ func mcpCmd() *cobra.Command {
 						fpath := filepath.Join(runDir, key)
 						if err := os.WriteFile(fpath, []byte(val), 0o600); err != nil {
 							return err
+						}
+						if err := chownForChild(fpath, runAsCred); err != nil {
+							return fmt.Errorf("sealed file for %s: %w", runAsDesc, err)
 						}
 						childEnv = append(childEnv, key+"="+fpath)
 						// Server args may reference the file as
@@ -1091,6 +1110,19 @@ func mcpCmd() *cobra.Command {
 
 			server := exec.Command(args[0], args[1:]...)
 			server.Env = childEnv
+			applyRunAs(server, runAsCred)
+			// Say plainly when secrets land in a child that shares our
+			// UID — the gap is real and the mitigation is one flag away.
+			if w := secretExposureWarning(len(secretMaps) > 0 || len(secretFileMaps) > 0, runAsCred); w != "" {
+				fmt.Fprintln(os.Stderr, "chancery: "+w)
+				e.st.Audit(store.AuditEvent{Event: "mcp.secrets_uid_shared", AgentID: a.ID,
+					Instance: inst.ID, Resource: serverName,
+					Reason: "tool server shares the operator UID; injected secrets readable via /proc (G17)"})
+			}
+			if runAsCred != nil {
+				e.st.Audit(store.AuditEvent{Event: "mcp.run_as", AgentID: a.ID,
+					Instance: inst.ID, Resource: serverName, Reason: "server user=" + runAsDesc})
+			}
 			server.Stderr = os.Stderr
 			serverIn, err := server.StdinPipe()
 			if err != nil {
@@ -1205,6 +1237,8 @@ func mcpCmd() *cobra.Command {
 		"confinement manifest, set on FIRST pin only: host the server may reach (repeatable; later changes via repin)")
 	wrap.Flags().StringSliceVar(&writablePaths, "writable", nil,
 		"confinement manifest, set on FIRST pin only: path the server may write (repeatable; later changes via repin)")
+	wrap.Flags().StringVar(&runAs, "run-as", "",
+		"run the tool server as this OS user (privilege separation, SECURITY.md G17): stops same-UID processes — including the agent runtime — reading injected secrets from /proc. Requires root")
 	wrap.Flags().BoolVar(&dryRun, "dry-run", false,
 		"preflight only: print the effective authority, pin status, and manifest this wrap would enforce — spawn nothing, pin nothing")
 	wrap.MarkFlagRequired("agent")

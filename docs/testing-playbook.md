@@ -351,7 +351,7 @@ make demo
 make test
 ```
 
-**Expect:** `go vet` clean and 105 tests across 11 packages green —
+**Expect:** `go vet` clean and 109 tests across 11 packages green —
 every step in this playbook is also locked by at least one of them
 (the map is in [CONTRIBUTING.md](../CONTRIBUTING.md)).
 

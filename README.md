@@ -68,7 +68,8 @@ order: [**testing playbook**](docs/testing-playbook.md).
 - **Callee trust** — the server's code identity is pinned (image digest,
   install tree, or binary) and re-verified before every spawn; drift
   refuses to start. `--confine` adds an egress allow-list and read-only
-  filesystem as an OS boundary.
+  filesystem as an OS boundary, and `--run-as` gives the server its own
+  UID so injected secrets aren't readable by anything sharing yours.
 - **Per-call semantics** — task-bound grants, a veto-only socket for your
   own intent checker, and short-lived leases a cooperating server verifies
   right before it commits.
@@ -103,7 +104,7 @@ with the same writs.
 
 ## Status
 
-**Beta.** All 19 design RFCs are locked and implemented; 105 tests across
+**Beta.** All 19 design RFCs are locked and implemented; 109 tests across
 11 packages gate every commit. The security model is settled and every
 known gap is published in [SECURITY.md](SECURITY.md) with an owner and a
 phase. The CLI and REST surfaces may still take breaking changes before
@@ -116,7 +117,7 @@ never paywalled; every gap in that table closes in the open core.
 ## Contributing
 
 ```sh
-make build && make test    # Go 1.26+, no CGO; go vet + 105 tests in seconds
+make build && make test    # Go 1.26+, no CGO; go vet + 109 tests in seconds
 make demo                  # the 60-second enforcement + audit arc
 ```
 

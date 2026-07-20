@@ -36,7 +36,7 @@ security is never paywalled ([RFC-011](rfcs/011-open-core-boundary.md)).
 | G14 | Capability leases require server cooperation | A non-cooperating tool server never checks its lease; a revocation landing mid-flight then still commits (admission-time denial remains the floor) | Inherent — per-server opt-in ([RFC-015](rfcs/015-call-lifecycle-and-leases.md)); one-shot third-party APIs stay the hard boundary |
 | G15 | The intent checker sees call arguments | The socket hands `{agent, task, tool, args}` to the operator-chosen checker; a malicious checker is a payload processor (though veto-only: it can never widen authority) | Inherent — choosing the checker is choosing a payload processor; documented, args never stored ([RFC-017](rfcs/017-intent-socket.md)) |
 | G16 | Confinement is host-granular and platform-uneven | Under `--confine` a compromised server can still exfiltrate *to an allowed host*; on Linux the egress boundary is proxy-env cooperative (filesystem is kernel-bounded via bwrap) until the netns phase — macOS bounds both | [RFC-018](rfcs/018-frozen-installs-and-confinement.md) · v1 (Linux netns; narrower rules are the argument-schema phase) |
-| G17 | Credential isolation is bounded by the OS user, not the process | Sealed secrets are injected into the *tool server's* environment, so any process that can read `/proc/<pid>/environ` for that server can read them — same-UID processes, and ancestors under the default `yama ptrace_scope=1`. Since the agent runtime usually *spawns* the wrap, a hostile runtime (as opposed to a prompt-injected model) is in that set. The guarantee is precise about the model's tool-call surface and the agent's own environment; it is not OS-level isolation from hostile code sharing the UID | Deployment guidance now: run the wrap under a separate OS user (or `ptrace_scope>=2`). Reported by u/Psychological_Arm645 |
+| G17 | Credential isolation is bounded by the OS user, not the process | Sealed secrets are injected into the *tool server's* environment, so any process that can read `/proc/<pid>/environ` for that server can read them — same-UID processes, and ancestors under the default `yama ptrace_scope=1`. Since the agent runtime usually *spawns* the wrap, a hostile runtime (as opposed to a prompt-injected model) is in that set. The guarantee is precise about the model's tool-call surface and the agent's own environment; it is not OS-level isolation from hostile code sharing the UID | **Mitigation shipped:** `mcp wrap --run-as <user>` runs the tool server under its own UID (ptrace checks credentials, so ancestry no longer helps); without it, wrap warns on stderr and audits `mcp.secrets_uid_shared`. `ptrace_scope>=2` also closes it. Reported by u/Psychological_Arm645 |
 
 ## Deployment guidance
 
@@ -58,6 +58,9 @@ security is never paywalled ([RFC-011](rfcs/011-open-core-boundary.md)).
 - Prompts, payloads, and tool arguments are **never stored** — the
   audit schema has no column for them (RFC-006).
 - Agents **never hold real credentials** — sealed values are injected
-  into the server side of the proxy only (RFC-003/005).
+  into the server side of the proxy only (RFC-003/005). Precisely: they
+  are absent from the model's context and the agent's own environment.
+  Isolation from other processes sharing the operator's UID requires
+  `--run-as` (G17).
 - Delegated authority **can only narrow** — the writ's delegation
   block format has no field that could widen it (RFC-002).
