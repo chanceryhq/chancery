@@ -21,14 +21,12 @@
       ]
     },
     {
-      "//": "Images are content-stable: safe to pin for a year.",
       "source": "/assets/:file(.+\\.(?:png|jpe?g|gif|svg|webp|ico|woff2?))",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
     {
-      "//": "CSS/JS filenames are NOT content-hashed, so they must revalidate — otherwise a fix is unreachable for anyone who already has the old copy. ETag keeps this cheap (304s).",
       "source": "/assets/:file(.+\\.(?:css|js))",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
