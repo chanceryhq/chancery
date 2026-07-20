@@ -4,285 +4,355 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Chancery — the identity provider for AI agents</title>
-<meta name="description" content="Open-source, self-hosted identity and authority layer for AI agents. Per-agent identity, delegation that can only narrow, revocation on the next call, and a tamper-evident audit trail agents can't write to.">
+<meta name="description" content="Open-source, self-hosted identity and authority for AI agents. Per-agent identity, delegation that can only narrow, revocation on the next tool call, and a tamper-evident audit trail the agent can't write to.">
+<link rel="canonical" href="https://chanceryai.vercel.app/">
 <meta property="og:title" content="Chancery — the identity provider for AI agents">
-<meta property="og:description" content="Per-agent identity, delegation that can only narrow, revocation on the next tool call, and an audit trail the agent can't write to. Apache-2.0, single Go binary.">
+<meta property="og:description" content="Per-agent identity, authority that can only narrow, revocation on the next tool call, and an audit trail the agent can't write to. Apache-2.0, single Go binary.">
 <meta property="og:type" content="website">
-<meta property="og:url" content="https://github.com/chanceryhq/chancery">
-<meta property="og:image" content="https://chanceryhq.github.io/chancery/assets/dashboard-audit.png">
+<meta property="og:url" content="https://chanceryai.vercel.app/">
+<meta property="og:image" content="https://chanceryai.vercel.app/assets/dashboard-audit.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%235e5ce6'/><path d='M11 10h10M16 10v13M12 23h8' stroke='white' stroke-width='2.4' stroke-linecap='round'/></svg>">
-<style>
-  :root{
-    --bg:#0d0e12; --panel:#16171c; --panel2:#1e1f24; --panel3:#26272d;
-    --line:#26272d; --line2:#33343b;
-    --ink:#e3e2e7; --dim:#918fa0; --faint:#63626e;
-    --seal:#5e5ce6; --seal-ink:#c2c1ff;
-    --allow:#34d399; --deny:#f87171;
-    --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html{background:var(--bg);-webkit-text-size-adjust:100%}
-  body{background:var(--bg);color:var(--ink);font:16px/1.6 var(--sans);
-    -webkit-font-smoothing:antialiased}
-  ::selection{background:rgba(94,92,230,.35)}
-  a{color:var(--seal-ink);text-decoration:none}
-  a:hover{text-decoration:underline}
-  .wrap{max-width:860px;margin:0 auto;padding:0 24px}
-  .eyebrow{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.18em;
-    text-transform:uppercase;color:var(--dim)}
-  .eyebrow .dot{display:inline-block;width:6px;height:6px;border-radius:99px;
-    background:var(--seal);margin-right:9px;vertical-align:1px}
-
-  header{border-bottom:1px solid var(--line);padding:20px 0}
-  header .wrap{display:flex;align-items:center;gap:20px}
-  .brand{font-weight:600;font-size:16px;letter-spacing:-.01em}
-  .brand b{color:var(--seal-ink)}
-  header nav{margin-left:auto;display:flex;gap:22px;font-size:14px}
-  header nav a{color:var(--dim)}
-  header nav a:hover{color:var(--ink);text-decoration:none}
-
-  .hero{padding:76px 0 8px}
-  h1{font-size:clamp(30px,5.2vw,46px);line-height:1.12;letter-spacing:-.025em;
-    font-weight:600;margin:18px 0 0;max-width:16ch}
-  h1 em{font-style:normal;color:var(--seal-ink)}
-  .lede{font-size:clamp(16px,2.2vw,18.5px);color:var(--dim);margin-top:20px;max-width:56ch}
-  .lede strong{color:var(--ink);font-weight:500}
-
-  .cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:32px}
-  .install{font-family:var(--mono);font-size:13.5px;background:var(--panel);
-    border:1px solid var(--line2);border-radius:6px;padding:12px 16px;color:var(--ink);
-    overflow-x:auto;white-space:nowrap;max-width:100%}
-  .install .p{color:var(--faint)}
-  .btn{display:inline-block;background:var(--seal);color:#fff;font-size:14px;font-weight:500;
-    border-radius:6px;padding:12px 20px;border:1px solid var(--seal)}
-  .btn:hover{text-decoration:none;filter:brightness(1.12)}
-  .btn.ghost{background:transparent;color:var(--ink);border-color:var(--line2)}
-  .meta{margin-top:18px;font-size:13.5px;color:var(--faint)}
-  .meta span{white-space:nowrap}
-  .meta i{font-style:normal;color:var(--line2);margin:0 10px}
-
-  figure{margin:52px 0 0}
-  figure img{width:100%;display:block;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
-  figcaption{font-size:13px;color:var(--faint);margin-top:10px;text-align:center}
-
-  section{padding:72px 0 0}
-  h2{font-size:23px;letter-spacing:-.015em;font-weight:600;margin:14px 0 0}
-  .sub{color:var(--dim);margin-top:12px;max-width:60ch}
-
-  .problem p{color:var(--dim);margin-top:14px;max-width:62ch}
-  .problem p strong{color:var(--ink);font-weight:500}
-
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:26px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:20px}
-  .card h3{font-size:15px;font-weight:600;margin-bottom:8px;letter-spacing:-.005em}
-  .card p{font-size:14.2px;color:var(--dim);line-height:1.55}
-  .card code{font-family:var(--mono);font-size:12.5px;color:var(--seal-ink);
-    background:var(--panel3);padding:1px 5px;border-radius:3px}
-
-  pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;
-    padding:18px 20px;margin-top:22px;overflow-x:auto}
-  pre code{font-family:var(--mono);font-size:13px;line-height:1.75;color:var(--ink);white-space:pre}
-  .c{color:var(--faint)}
-  .k{color:var(--seal-ink)}
-  .ok{color:var(--allow)}
-  .no{color:var(--deny)}
-
-  .honest{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--seal);
-    border-radius:8px;padding:24px 26px;margin-top:26px}
-  .honest p{color:var(--dim);margin-top:12px;font-size:15px}
-  .honest p:first-child{margin-top:0}
-
-  footer{margin-top:88px;border-top:1px solid var(--line);padding:32px 0 60px;
-    font-size:14px;color:var(--faint)}
-  footer .wrap{display:flex;flex-wrap:wrap;gap:10px 26px;align-items:center}
-  footer .sp{margin-left:auto}
-  @media(max-width:620px){
-    .hero{padding:52px 0 0} section{padding:56px 0 0}
-    footer .sp{margin-left:0;width:100%}
-  }
-</style>
+<meta name="theme-color" content="#0b0c0f">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%235e5ce6'/><path d='M10.5 10.5h11M16 10.5V23M12 23h8' stroke='white' stroke-width='2.5' stroke-linecap='round'/></svg>">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/boot.js"></script>
 </head>
 <body>
 
-<header><div class="wrap">
-  <span class="brand">Chan<b>cery</b></span>
-  <nav>
-    <a href="https://github.com/chanceryhq/chancery#guides">Docs</a>
-    <a href="https://github.com/chanceryhq/chancery/tree/main/rfcs">RFCs</a>
-    <a href="https://github.com/chanceryhq/chancery/blob/main/SECURITY.md">Security</a>
-    <a href="https://github.com/chanceryhq/chancery">GitHub</a>
-  </nav>
-</div></header>
+<header>
+  <div class="wrap">
+    <a class="brand" href="/">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#5e5ce6"/><path d="M10.5 10.5h11M16 10.5V23M12 23h8" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg>
+      Chancery
+    </a>
+    <nav>
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#security">Security</a>
+      <a class="hide-sm" href="#enterprise">Enterprise</a>
+      <a class="nav-cta" href="https://github.com/chanceryhq/chancery">GitHub</a>
+    </nav>
+  </div>
+</header>
 
-<div class="wrap">
+<!-- ── hero ─────────────────────────────────────────── -->
+<div class="hero">
+  <div class="wrap">
+    <div class="eyebrow rv">Open source · Apache-2.0 · Self-hosted</div>
+    <h1 class="rv" data-delay="60">The identity provider for <span class="g">AI agents</span>.</h1>
+    <p class="lede rv" data-delay="120">Your agents share one API key, can't be stopped mid-task,
+      and write their own logs. Chancery gives them what every other privileged identity
+      already has: <b>their own identity, authority that can only narrow, revocation that
+      lands on the next call, and an audit trail they can't write to.</b></p>
 
-  <div class="hero">
-    <div class="eyebrow"><span class="dot"></span>Open source · Apache-2.0 · Self-hosted</div>
-    <h1>The identity provider for <em>AI agents</em>.</h1>
-    <p class="lede">Your agents run on a shared API key, can't be stopped mid-task,
-      and write their own logs. Chancery gives them what every other privileged
-      identity already has: <strong>their own identity, scoped authority,
-      instant revocation, and an audit trail they can't write to.</strong></p>
-
-    <div class="cta">
-      <span class="install"><span class="p">$</span> brew install chanceryhq/tap/chancery</span>
-      <a class="btn" href="https://github.com/chanceryhq/chancery">View on GitHub</a>
+    <div class="cta rv" data-delay="180">
+      <button class="copy" data-copy="brew install chanceryhq/tap/chancery" aria-label="Copy install command">
+        <span class="p">$</span><code>brew install chanceryhq/tap/chancery</code>
+        <span class="ico" aria-hidden="true">copy</span>
+      </button>
+      <a class="btn" href="https://github.com/chanceryhq/chancery">Star on GitHub</a>
       <a class="btn ghost" href="https://github.com/chanceryhq/chancery/blob/main/QUICKSTART.md">5-min quickstart</a>
     </div>
 
-    <p class="meta">
-      <span>Single Go binary</span><i>·</i>
-      <span>No cloud, no telemetry</span><i>·</i>
-      <span>105 tests, 19 locked RFCs</span><i>·</i>
-      <span>Signed releases + SBOM</span>
-    </p>
+    <div class="stats rv" data-delay="240">
+      <div class="stat"><div class="n">1</div><div class="l">Go binary</div></div>
+      <div class="stat"><div class="n">19</div><div class="l">Locked RFCs</div></div>
+      <div class="stat"><div class="n">105</div><div class="l">Tests</div></div>
+      <div class="stat"><div class="n">0</div><div class="l">Cloud deps</div></div>
+    </div>
+
+    <!-- terminal -->
+    <div class="term rv" data-delay="300">
+      <div class="term-bar"><i></i><i></i><i></i><span>deploy-bot — governed session</span></div>
+      <!-- Static transcript: readable with scripting off; app.js replays it typed. -->
+      <div class="term-body" id="term-body" aria-live="polite"><div class="cmd">chancery writ grant --to deploy-bot --cap "call:github/get_*" --ttl 8h</div><div class="dim">writ w_01K3MZQ4T8 · block b_01K3MZQ4TB · expires in 8h</div><br><div class="cmd">chancery mcp wrap --agent deploy-bot --writ w_01K3MZQ4T8 -- npx @acme/github-mcp</div><div class="dim">listening · tools/list filtered to the writ</div><br><div class="dim">  agent → github/get_pull_request</div><div class="ok">  ALLOW   forwarded · attributed · recorded</div><div class="dim">  agent → github/delete_repo</div><div class="no">  DENY    never reached the server</div><br><div class="cmd">chancery writ revoke w_01K3MZQ4T8</div><div class="dim">revoked — the delegation tree dies on the next call</div><br><div class="dim">  agent → github/get_pull_request</div><div class="no">  DENY    authority revoked · mid-session, no restart</div></div>
+      <div class="term-foot">
+        <span>Real command output. Nothing here is mocked.</span>
+        <button class="replay" id="replay" type="button" hidden>Replay ↻</button>
+      </div>
+    </div>
   </div>
-
-  <figure>
-    <img src="assets/chancery-demo.gif"
-         alt="Terminal demo: granting a writ, an allowed tool call, revoking mid-task, the next call denied, and the tamper-evident audit trail verifying."
-         loading="lazy">
-    <figcaption>Grant → act → revoke mid-task → denied on the next call → verified audit trail. 60 seconds, end to end.</figcaption>
-  </figure>
-
-  <section class="problem">
-    <div class="eyebrow"><span class="dot"></span>The problem</div>
-    <h2>We give agents more standing power than we'd give a new engineer.</h2>
-    <p>Agents usually share one API key — so you can't revoke one without breaking
-      the rest, and you can't attribute an action to a specific agent.</p>
-    <p>A prompt injection isn't just bad output: it drives <strong>every tool the
-      agent can reach</strong>. And "revoking" an agent usually means waiting for a
-      token to expire, because nothing sits in the call path to stop the next action.</p>
-    <p>Worst of all, the logs are written by the agent — <strong>the exact component
-      you stopped trusting</strong> the moment it was compromised.</p>
-  </section>
-
-  <section>
-    <div class="eyebrow"><span class="dot"></span>What Chancery does</div>
-    <h2>Identity, authority, and evidence — enforced outside the agent.</h2>
-    <div class="grid">
-      <div class="card">
-        <h3>Real identities</h3>
-        <p>Every agent registers with an accountable human owner and gets its own
-          identity: agent → immutable version → revocable running instance. Change
-          the prompt and it's a new version — "did this change since review?" is a
-          hash comparison.</p>
-      </div>
-      <div class="card">
-        <h3>Authority that only narrows</h3>
-        <p>Authority is a <em>writ</em>: a signed chain where every delegation can
-          only add restrictions. A sub-agent structurally cannot escalate — the
-          block format has no field that could widen it.</p>
-      </div>
-      <div class="card">
-        <h3>Revocation on the next call</h3>
-        <p>The enforcement proxy re-reads live state on every tool call, so
-          <code>writ revoke</code> takes effect on the agent's next action — mid-session,
-          no restart, no waiting for a token to expire.</p>
-      </div>
-      <div class="card">
-        <h3>Agents never hold secrets</h3>
-        <p>Credentials are sealed and injected into the <em>tool server's</em>
-          environment at spawn — never into the agent's context. Prompt injection
-          can't exfiltrate what was never there.</p>
-      </div>
-      <div class="card">
-        <h3>The tools are verified too</h3>
-        <p>The first run pins your MCP server's code identity — image digest, whole
-          dependency tree, or binary hash — and refuses to start on drift.
-          <code>--confine</code> adds an egress allow-list and a read-only filesystem,
-          enforced by the OS.</p>
-      </div>
-      <div class="card">
-        <h3>Evidence, not logs</h3>
-        <p>Every decision is recorded by the gate, not the agent, in a hash-chained
-          trail that detects any edit or deletion. Metadata-only by schema: prompts
-          and payloads have nowhere to be stored.</p>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="eyebrow"><span class="dot"></span>In practice</div>
-    <h2>Wrap any MCP server. Nothing else changes.</h2>
-    <p class="sub">Chancery sits in the stdio path between the agent and the tool
-      server, so a prompt-injected agent can't talk its way around it.</p>
-<pre><code><span class="c"># give an agent a scoped, expiring grant</span>
-chancery writ grant --for user:you@acme.com --to deploy-bot \
-    --cap <span class="k">"call:github/get_*"</span> --ttl 8h
-
-<span class="c"># run the real server behind the gate, with a sealed token</span>
-chancery mcp wrap --agent deploy-bot --writ &lt;id&gt; \
-    --secret GITHUB_TOKEN=github-token -- npx @acme/github-mcp
-
-<span class="ok">  get_pull_request  → ALLOW</span>   <span class="c">forwarded, attributed, recorded</span>
-<span class="no">  delete_repo       → DENY</span>    <span class="c">never reaches the server</span>
-
-<span class="c"># kill it mid-task — the next call fails, not the next token</span>
-chancery writ revoke &lt;id&gt;</code></pre>
-  </section>
-
-  <section>
-    <div class="eyebrow"><span class="dot"></span>See what happened</div>
-    <h2>A timeline written by the gate, not the agent.</h2>
-    <p class="sub">Chancery ships a read-only dashboard: the live audit timeline
-      with a permanent integrity badge, the agent roster with spawn provenance,
-      and the delegation tree rendered as a tree. Writes stay in the CLI — a
-      dashboard that can grant authority is a dashboard worth attacking.</p>
-    <figure>
-      <img src="assets/dashboard-audit.png" loading="lazy"
-           alt="Chancery dashboard: audit timeline in plain English with decisions and a live integrity badge.">
-      <figcaption>Every decision, attributed — with a hash-chain integrity badge that
-        turns red on any edit, deletion, or reorder.</figcaption>
-    </figure>
-    <figure>
-      <img src="assets/dashboard-writs.png" loading="lazy"
-           alt="Chancery dashboard: writs of authority rendered as a delegation tree.">
-      <figcaption>The delegation tree. Each block can only narrow what its parent held.</figcaption>
-    </figure>
-  </section>
-
-  <section>
-    <div class="eyebrow"><span class="dot"></span>Honesty as a feature</div>
-    <h2>Every known gap is published.</h2>
-    <div class="honest">
-      <p>Chancery is a security product, so its own security posture is documented
-        rather than implied: a full threat model (STRIDE, OWASP LLM and Agentic Top
-        10 mappings, abuse cases) and a <strong>table of every known gap</strong> —
-        each with an owner and a phase.</p>
-      <p>Two promises: what ships open source stays Apache-2.0, no license flip ever;
-        and <strong>security is never paywalled</strong> — every gap in that table
-        closes in the open-source core.</p>
-      <p><a href="https://github.com/chanceryhq/chancery/blob/main/SECURITY.md">Read the gap table →</a>
-        &nbsp; <a href="https://github.com/chanceryhq/chancery/blob/main/rfcs/009-threat-model.md">Read the threat model →</a></p>
-    </div>
-  </section>
-
-  <section>
-    <div class="eyebrow"><span class="dot"></span>Built in the open</div>
-    <h2>19 design decisions, each argued before it was written.</h2>
-    <p class="sub">Chancery is built as a series of locked RFCs — the problem, the
-      alternatives considered, the decision, the trade-offs accepted, and the
-      failure modes. If you want to know why something works the way it does, the
-      argument is in the repo.</p>
-    <div class="cta">
-      <a class="btn ghost" href="https://github.com/chanceryhq/chancery/tree/main/rfcs">Read the RFCs</a>
-      <a class="btn ghost" href="https://github.com/chanceryhq/chancery/blob/main/docs/verify.md">Verify every claim yourself</a>
-    </div>
-  </section>
-
 </div>
 
-<footer><div class="wrap">
-  <span>Chancery — Apache-2.0</span>
-  <a href="https://github.com/chanceryhq/chancery">GitHub</a>
-  <a href="https://github.com/chanceryhq/chancery/blob/main/CHANGELOG.md">Changelog</a>
-  <a href="https://github.com/chanceryhq/chancery/issues">Issues</a>
-  <span class="sp">Running agents in production? Tell me where this breaks —
-    <a href="https://github.com/chanceryhq/chancery/issues/new">open an issue</a>.</span>
-</div></footer>
+<!-- ── problem ──────────────────────────────────────── -->
+<section id="problem">
+  <div class="wrap">
+    <div class="eyebrow rv">The problem</div>
+    <h2 class="rv" data-delay="60">We give agents more standing power than we'd give a new engineer.</h2>
+    <p class="sub rv" data-delay="90">Three failures show up in almost every agent deployment —
+      and none of them are the model's fault.</p>
+    <div class="cards bad">
+      <div class="card rv" data-delay="120">
+        <span class="num">01</span>
+        <h3>Shared credentials</h3>
+        <p>Agents run on one API key. You can't revoke a single agent without breaking
+          every other one, and you can't attribute an action to a specific agent after
+          the fact.</p>
+      </div>
+      <div class="card rv" data-delay="190">
+        <span class="num">02</span>
+        <h3>Injection becomes escalation</h3>
+        <p>Once an agent is wired to a tool, every capability that tool exposes is
+          reachable. A successful injection doesn't just change output — it drives
+          anything the agent can touch.</p>
+      </div>
+      <div class="card rv" data-delay="260">
+        <span class="num">03</span>
+        <h3>Logs from the compromised party</h3>
+        <p>"Revoking" usually means waiting for a token to expire. And the record of what
+          happened is written by the agent — the exact component you stopped trusting.</p>
+      </div>
+    </div>
+  </div>
+</section>
 
+<!-- ── how ──────────────────────────────────────────── -->
+<section id="how">
+  <div class="wrap">
+    <div class="eyebrow rv">How it works</div>
+    <h2 class="rv" data-delay="60">A gate the agent cannot talk its way around.</h2>
+    <p class="sub rv" data-delay="90">Chancery runs as an out-of-process proxy in the tool-call
+      path. The agent holds no credentials and no server command — only a request that has
+      to survive the gate.</p>
+
+    <div class="flow rv" data-delay="130">
+      <div class="flow-row">
+        <div class="node">
+          <div class="t">Untrusted</div>
+          <div class="h">The agent</div>
+          <p>Holds an identity document. No API keys, no server command, no way to skip
+            the next step.</p>
+        </div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="node gate">
+          <div class="t">In-path · fail closed</div>
+          <div class="h">Chancery</div>
+          <p>Decides every call against live state, then records it.</p>
+          <div class="checks">
+            <span class="chip">agent alive</span>
+            <span class="chip">writ valid</span>
+            <span class="chip">not revoked</span>
+            <span class="chip">allow-list</span>
+            <span class="chip">audited</span>
+          </div>
+        </div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="node">
+          <div class="t">Pinned · confined</div>
+          <div class="h">The tool server</div>
+          <p>Its code identity is verified before every spawn. Secrets are injected
+            <em>here</em> — never into the agent.</p>
+        </div>
+      </div>
+      <p class="flow-note">Because state is read per call, revocation takes effect on the
+        <b>next action</b> — no propagation delay, no CRL, no cache to expire.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── features ─────────────────────────────────────── -->
+<section id="features">
+  <div class="wrap">
+    <div class="eyebrow rv">What you get</div>
+    <h2 class="rv" data-delay="60">Identity, authority, and evidence — enforced outside the agent.</h2>
+    <div class="cards">
+      <div class="card rv" data-delay="110">
+        <h3>Real identities</h3>
+        <p>Agent → immutable content-addressed version → revocable running instance, each
+          separately killable and owned by a named human. Change the prompt and it's a new
+          version — "did this change since review?" is a hash comparison.</p>
+      </div>
+      <div class="card rv" data-delay="160">
+        <h3>Authority that only narrows</h3>
+        <p>A <em>writ</em> is a signed chain where every delegation can only add
+          restrictions. Widening isn't forbidden, it's unrepresentable: the block format
+          has no field for it. Revoke any block and its whole subtree dies.</p>
+      </div>
+      <div class="card rv" data-delay="210">
+        <h3>Revocation that lands</h3>
+        <p><code>writ revoke</code> takes effect on the agent's very next tool call —
+          mid-session, no restart, no waiting out a token's lifetime.</p>
+      </div>
+      <div class="card rv" data-delay="260">
+        <h3>Agents never hold secrets</h3>
+        <p>Credentials are AEAD-sealed and injected into the tool server's environment at
+          spawn. Prompt injection cannot exfiltrate what was never in the context.</p>
+      </div>
+      <div class="card rv" data-delay="310">
+        <h3>The tools get verified too</h3>
+        <p>Pin an MCP server by image digest, whole install tree, or binary hash — drift
+          refuses to start. <code>--confine</code> adds an egress allow-list and a
+          read-only filesystem, enforced by the OS.</p>
+      </div>
+      <div class="card rv" data-delay="360">
+        <h3>Evidence, not logs</h3>
+        <p>Hash-chained and metadata-only <em>by schema</em>: prompts, payloads, and
+          arguments have nowhere to be stored. Written by the gate, so a compromised agent
+          can't skip or forge an entry.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── code ─────────────────────────────────────────── -->
+<section id="code">
+  <div class="wrap">
+    <div class="eyebrow rv">In practice</div>
+    <h2 class="rv" data-delay="60">Four commands you'll actually use.</h2>
+    <div data-tabs>
+      <div class="tabs rv" data-delay="100" role="tablist" aria-label="Common workflows">
+        <button class="tab" role="tab" id="t1" aria-controls="p1">Grant &amp; delegate</button>
+        <button class="tab" role="tab" id="t2" aria-controls="p2">Enforce</button>
+        <button class="tab" role="tab" id="t3" aria-controls="p3">Pin &amp; confine</button>
+        <button class="tab" role="tab" id="t4" aria-controls="p4">Audit</button>
+      </div>
+      <div class="panes rv" data-delay="140">
+<pre id="p1" role="tabpanel" aria-labelledby="t1"><code><span class="c"># authority under a named human, scoped and expiring</span>
+chancery writ grant --for <span class="s">user:you@acme.com</span> --to deploy-bot \
+    --cap <span class="k">"call:github/get_*"</span> --ttl 8h --task <span class="s">"review PR #123"</span>
+
+<span class="c"># hand a sub-agent LESS — never more; widening has no syntax</span>
+chancery writ delegate &lt;writ-id&gt; --to test-runner \
+    --caveat <span class="k">"call:github/get_pull_request"</span>
+
+chancery writ check &lt;writ-id&gt; --resource github/get_pull_request
+<span class="g">ALLOW</span>  lineage: user:you@acme.com → deploy-bot → test-runner</code></pre>
+
+<pre id="p2" role="tabpanel" aria-labelledby="t2" hidden><code><span class="c"># seal a credential — the agent never sees this value</span>
+chancery secret put github-token --from-file ./token
+
+<span class="c"># run the real server behind the gate</span>
+chancery mcp wrap --agent deploy-bot --writ &lt;writ-id&gt; \
+    --secret <span class="k">GITHUB_TOKEN=github-token</span> -- npx @acme/github-mcp
+
+<span class="g">  get_pull_request → ALLOW</span>   forwarded · attributed · recorded
+<span class="r">  delete_repo      → DENY</span>    never reaches the server
+
+<span class="c"># preflight anything first — spawns nothing, pins nothing</span>
+chancery mcp wrap --agent deploy-bot --writ &lt;id&gt; --dry-run -- npx @acme/github-mcp</code></pre>
+
+<pre id="p3" role="tabpanel" aria-labelledby="t3" hidden><code><span class="c"># frozen install: exact version, no lifecycle scripts, tree-pinned</span>
+chancery mcp install <span class="s">@acme/github-mcp@1.4.2</span> \
+    --egress <span class="k">api.github.com</span> --writable <span class="k">/tmp/agent-scratch</span>
+
+<span class="c"># poison ONE file in that tree and the next run refuses to start</span>
+<span class="r">error:</span> server "github" drifted from its pin
+       pinned tree:9f2c1a… found tree:4b7e08…  (refusing to start)
+
+<span class="c"># apply the manifest as an OS boundary: egress + read-only FS</span>
+chancery mcp wrap --agent deploy-bot --writ &lt;id&gt; --confine -- <span class="k">$(chancery mcp path github)</span></code></pre>
+
+<pre id="p4" role="tabpanel" aria-labelledby="t4" hidden><code>chancery audit
+TIME      EVENT             AGENT       DECISION  ACTION
+10:24:01  mcp.call          deploy-bot  <span class="g">ALLOW</span>     call:github/get_pull_request
+10:24:07  mcp.call          deploy-bot  <span class="r">DENY</span>      call:github/delete_repo
+10:24:12  writ.revoke       —                     w_01K3MZQ4T8
+10:24:15  mcp.call          deploy-bot  <span class="r">DENY</span>      call:github/get_pull_request
+
+<span class="c"># the chain detects any edit, deletion, or reorder</span>
+chancery audit verify
+audit chain intact: 147 events verified
+
+<span class="c"># NDJSON for your SIEM — still metadata-only, by schema</span>
+chancery audit --json | your-log-shipper</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── dashboard ────────────────────────────────────── -->
+<section id="dashboard">
+  <div class="wrap">
+    <div class="eyebrow rv">See what happened</div>
+    <h2 class="rv" data-delay="60">A timeline written by the gate, not the agent.</h2>
+    <p class="sub rv" data-delay="90">Chancery ships a read-only dashboard: the live audit
+      timeline with a permanent integrity badge, the agent roster with spawn provenance, and
+      the delegation tree rendered as a tree. Writes stay in the CLI — a dashboard that can
+      grant authority is a dashboard worth attacking.</p>
+    <figure class="rv" data-delay="120">
+      <img src="assets/dashboard-audit.png" loading="lazy" width="1600" height="1000"
+           alt="Chancery dashboard showing the audit timeline in plain English with allow and deny decisions and a live integrity badge.">
+      <figcaption>Every decision, attributed — with a hash-chain badge that breaks on any tampering.</figcaption>
+    </figure>
+    <figure class="rv" data-delay="160">
+      <img src="assets/dashboard-writs.png" loading="lazy" width="1600" height="1000"
+           alt="Chancery dashboard showing writs of authority as a delegation tree.">
+      <figcaption>The delegation tree. Each block can only narrow what its parent held.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ── security ─────────────────────────────────────── -->
+<section id="security">
+  <div class="wrap">
+    <div class="eyebrow rv">Honesty as a feature</div>
+    <h2 class="rv" data-delay="60">Every known gap is published.</h2>
+    <div class="honest rv" data-delay="100">
+      <p>Chancery is a security product, so its own posture is documented rather than
+        implied: a full threat model — STRIDE, OWASP LLM and Agentic Top 10 mappings, abuse
+        cases walked — and a <b>table of every known gap</b>, each with an owner and a phase.</p>
+      <p>Two promises. What ships open source <b>stays Apache-2.0</b> — no license flip,
+        ever. And <b>security is never paywalled</b>: every gap in that table closes in the
+        open-source core.</p>
+      <p>The design itself is public too — 19 locked RFCs, each stating the problem, the
+        alternatives considered, the decision, the trade-offs accepted, and the failure
+        modes. If you want to know why something works the way it does, the argument is in
+        the repo.</p>
+      <div class="links">
+        <a href="https://github.com/chanceryhq/chancery/blob/main/SECURITY.md">The gap table →</a>
+        <a href="https://github.com/chanceryhq/chancery/blob/main/rfcs/009-threat-model.md">Threat model →</a>
+        <a href="https://github.com/chanceryhq/chancery/tree/main/rfcs">All 19 RFCs →</a>
+        <a href="https://github.com/chanceryhq/chancery/blob/main/docs/verify.md">Verify it yourself →</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── enterprise ───────────────────────────────────── -->
+<section id="enterprise">
+  <div class="wrap">
+    <div class="ent rv">
+      <div class="in">
+        <div class="eyebrow">Enterprise</div>
+        <h2>Running agents somewhere that has auditors?</h2>
+        <p>Everything that makes a single trust domain secure and operable is open source,
+          forever. What exists only at organizational scale is where the commercial edition
+          starts:</p>
+        <ul>
+          <li><b>SSO &amp; SCIM</b> — bind agent ownership to your existing identity provider</li>
+          <li><b>Multi-tenancy &amp; scoped operator roles</b> — beyond a single admin token</li>
+          <li><b>SIEM export &amp; external anchoring</b> — audit chains you can prove to a third party</li>
+          <li><b>Compliance packs &amp; HA orchestration</b> — EU AI Act, SOC 2 evidence, Postgres backends</li>
+          <li><b>Design-partner support</b> — direct line to the person who wrote it</li>
+        </ul>
+        <div class="cta">
+          <a class="btn" href="mailto:aneeshgupta709@gmail.com?subject=Chancery%20—%20enterprise%20enquiry&amp;body=Hi%20Aneesh%2C%0A%0AWe're%20running%20agents%20at%20%5Bcompany%5D%20and%20I'd%20like%20to%20talk%20about%3A%0A%0A-%20What%20we're%20building%3A%0A-%20How%20many%20agents%20%2F%20what%20they%20touch%3A%0A-%20What%20we%20need%20that%20the%20open%20core%20doesn't%20do%3A%0A%0AThanks%2C">Talk to me →</a>
+          <button class="copy" data-copy="aneeshgupta709@gmail.com" aria-label="Copy email address">
+            <code>aneeshgupta709@gmail.com</code>
+            <span class="ico" aria-hidden="true">copy</span>
+          </button>
+        </div>
+        <p style="margin-top:20px;font-size:14.6px">Not enterprise, just running agents and
+          something broke? That's more useful to me than a star —
+          <a href="https://github.com/chanceryhq/chancery/issues/new">open an issue</a> or
+          email the same address.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>Chancery — Apache-2.0</span>
+    <a href="https://github.com/chanceryhq/chancery">GitHub</a>
+    <a href="https://github.com/chanceryhq/chancery/blob/main/CHANGELOG.md">Changelog</a>
+    <a href="https://github.com/chanceryhq/chancery/tree/main/rfcs">RFCs</a>
+    <a href="mailto:aneeshgupta709@gmail.com">Contact</a>
+    <span class="sp">No analytics, no trackers, no third-party requests.<br>Built by
+      <a href="https://github.com/anee769">Aneesh Gupta</a>.</span>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
 </body>
 </html>

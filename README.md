@@ -5,7 +5,7 @@ identity, authority that can only narrow when delegated, revocation
 that lands on its *next* action, and an audit trail it cannot write to.
 
 Self-hosted. Single Go binary. Apache-2.0.
-[chanceryhq.github.io/chancery](https://chanceryhq.github.io/chancery/)
+[chanceryai.vercel.app](https://chanceryai.vercel.app/)
 
 ![Chancery demo: grant, allow, revoke, deny, tamper-evident audit](demo/chancery-demo.gif)
 

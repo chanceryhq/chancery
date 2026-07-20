@@ -8,3 +8,9 @@
 
 # local design mocks (Stitch exports)
 /stitch_chancery_identity_dashboard/
+.vercel
+.env*
+
+# Vercel
+.vercel
+.env*.local
