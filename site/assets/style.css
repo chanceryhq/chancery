@@ -22,7 +22,9 @@ body{background:var(--bg);color:var(--ink);font:16px/1.62 var(--sans);
 ::selection{background:rgba(94,92,230,.4)}
 a{color:var(--seal-ink);text-decoration:none}
 a:hover{text-decoration:underline}
-img{max-width:100%;display:block}
+/* height:auto is load-bearing — without it, width/height attributes fight
+   max-width and the image renders squashed. */
+img{max-width:100%;height:auto;display:block}
 
 .wrap{max-width:var(--wrap);margin:0 auto;padding:0 24px}
 .eyebrow{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.2em;
