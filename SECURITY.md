@@ -12,10 +12,10 @@ Use **GitHub private vulnerability reporting** on this repository
 issues for vulnerabilities. Target response: 48h acknowledgment,
 90-day coordinated disclosure.
 
-## Known limitations (pre-alpha) — the honest gap table
+## Known limitations — the honest gap table
 
-These are stated design gaps of the current MVP, each with an owner and
-phase (RFC-009 §5). **All of them close in the open-source core** —
+These are stated design gaps of the current release, each with an owner
+and phase (RFC-009 §5). **All of them close in the open-source core** —
 security is never paywalled ([RFC-011](rfcs/011-open-core-boundary.md)).
 
 | # | Gap | Exposure | Phase |

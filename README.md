@@ -57,6 +57,18 @@ trust domain secure and operable is open source; value that exists
 only at organizational scale (SSO/SCIM, multi-tenancy, SIEM exporters,
 compliance packs, HA orchestration) is enterprise.
 
+## Status
+
+**Beta.** All 19 design RFCs are locked and implemented; 105 tests
+across 11 packages gate every commit; releases are cosign-signed and
+ship an SBOM. The security model is settled, and every known gap is
+published in [SECURITY.md](SECURITY.md) with an owner and a phase —
+all of them close in the open-source core.
+
+What beta still means: the CLI and REST surfaces may take breaking
+changes before 1.0, always called out in release notes. Run it, build
+on it, and tell me what breaks.
+
 ## Install
 
 ```sh
@@ -71,7 +83,7 @@ Release binaries and checksums are cosign-signed (keyless, via GitHub
 OIDC) and ship with an SBOM; verification instructions are in each
 release's notes.
 
-## Try it (pre-alpha)
+## Try it
 
 ```sh
 ./chancery init --trust-domain acme.com
@@ -247,22 +259,22 @@ Design happens as a series of locked decisions, one RFC at a time
 
 | RFC | Title | Status |
 |-----|-------|--------|
-| [000](rfcs/000-vision-and-plan.md) | Vision and plan | In Review |
-| [001](rfcs/001-agent-identity-model.md) | Agent identity model | In Review |
-| [002](rfcs/002-lineage-and-delegation.md) | Lineage and delegation | In Review |
-| [003](rfcs/003-credential-broker.md) | Credential broker | In Review |
-| [004](rfcs/004-policy-and-authorization.md) | Policy and authorization | In Review |
-| [005](rfcs/005-runtime-enforcement.md) | Runtime enforcement (MCP → HTTP → shell → browser) | In Review |
-| [006](rfcs/006-audit-and-attribution.md) | Audit and attribution | In Review |
-| [007](rfcs/007-lifecycle-and-revocation.md) | Lifecycle and revocation | In Review |
-| [008](rfcs/008-data-model-and-apis.md) | Data model and APIs | In Review |
-| [009](rfcs/009-threat-model.md) | Threat model | In Review |
-| [010](rfcs/010-mvp-scope.md) | MVP scope (the 90-day build) | In Review |
-| [011](rfcs/011-open-core-boundary.md) | Open-core boundary | In Review |
-| [012](rfcs/012-dynamic-agent-creation.md) | Dynamic agent creation (writ-gated runtime spawn) | In Review |
-| [013](rfcs/013-browser-sessions-and-tokens.md) | Browser sessions and tokens as governed credentials | In Review |
-| [014](rfcs/014-read-only-dashboard.md) | Read-only dashboard (`/ui`) | In Review |
-| [015](rfcs/015-call-lifecycle-and-leases.md) | Call lifecycle and capability leases | In Review |
-| [016](rfcs/016-server-pinning.md) | Server pinning (callee identity: binary, tree, digest) | In Review |
-| [017](rfcs/017-intent-socket.md) | Task-bound grants and the intent socket | In Review |
-| [018](rfcs/018-frozen-installs-and-confinement.md) | Frozen installs and manifest-bounded confinement | In Review |
+| [000](rfcs/000-vision-and-plan.md) | Vision and plan | Locked |
+| [001](rfcs/001-agent-identity-model.md) | Agent identity model | Locked |
+| [002](rfcs/002-lineage-and-delegation.md) | Lineage and delegation | Locked |
+| [003](rfcs/003-credential-broker.md) | Credential broker | Locked |
+| [004](rfcs/004-policy-and-authorization.md) | Policy and authorization | Locked |
+| [005](rfcs/005-runtime-enforcement.md) | Runtime enforcement (MCP → HTTP → shell → browser) | Locked |
+| [006](rfcs/006-audit-and-attribution.md) | Audit and attribution | Locked |
+| [007](rfcs/007-lifecycle-and-revocation.md) | Lifecycle and revocation | Locked |
+| [008](rfcs/008-data-model-and-apis.md) | Data model and APIs | Locked |
+| [009](rfcs/009-threat-model.md) | Threat model | Locked |
+| [010](rfcs/010-mvp-scope.md) | MVP scope (the 90-day build) | Locked |
+| [011](rfcs/011-open-core-boundary.md) | Open-core boundary | Locked |
+| [012](rfcs/012-dynamic-agent-creation.md) | Dynamic agent creation (writ-gated runtime spawn) | Locked |
+| [013](rfcs/013-browser-sessions-and-tokens.md) | Browser sessions and tokens as governed credentials | Locked |
+| [014](rfcs/014-read-only-dashboard.md) | Read-only dashboard (`/ui`) | Locked |
+| [015](rfcs/015-call-lifecycle-and-leases.md) | Call lifecycle and capability leases | Locked |
+| [016](rfcs/016-server-pinning.md) | Server pinning (callee identity: binary, tree, digest) | Locked |
+| [017](rfcs/017-intent-socket.md) | Task-bound grants and the intent socket | Locked |
+| [018](rfcs/018-frozen-installs-and-confinement.md) | Frozen installs and manifest-bounded confinement | Locked |

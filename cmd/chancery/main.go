@@ -864,7 +864,7 @@ func serveCmd() *cobra.Command {
 			defer e.st.Close()
 			tokenHash, err := e.st.GetConfig("admin_token_hash")
 			if err != nil {
-				return fmt.Errorf("no admin token — re-run `chancery init` (pre-alpha state upgrade)")
+				return fmt.Errorf("no admin token — re-run `chancery init` (state created before admin tokens existed)")
 			}
 			srv := &api.Server{
 				Svc:            &service.Service{St: e.st, Iss: e.iss},

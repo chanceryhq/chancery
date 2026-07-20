@@ -1,8 +1,9 @@
 # RFC-004: Policy and Authorization
 
-- **Status:** In Review
+- **Status:** Locked
 - **Author:** Aneesh Gupta
 - **Created:** 2026-07-04
+- **Locked:** 2026-07-20
 - **Depends on:** RFC-001, RFC-002
 - **Blocks:** RFC-005
 

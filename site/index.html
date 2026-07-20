@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chancery — the identity provider for AI agents</title>
+<meta name="description" content="Open-source, self-hosted identity and authority layer for AI agents. Per-agent identity, delegation that can only narrow, revocation on the next call, and a tamper-evident audit trail agents can't write to.">
+<meta property="og:title" content="Chancery — the identity provider for AI agents">
+<meta property="og:description" content="Per-agent identity, delegation that can only narrow, revocation on the next tool call, and an audit trail the agent can't write to. Apache-2.0, single Go binary.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://github.com/chanceryhq/chancery">
+<meta property="og:image" content="https://chanceryhq.github.io/chancery/assets/dashboard-audit.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%235e5ce6'/><path d='M11 10h10M16 10v13M12 23h8' stroke='white' stroke-width='2.4' stroke-linecap='round'/></svg>">
+<style>
+  :root{
+    --bg:#0d0e12; --panel:#16171c; --panel2:#1e1f24; --panel3:#26272d;
+    --line:#26272d; --line2:#33343b;
+    --ink:#e3e2e7; --dim:#918fa0; --faint:#63626e;
+    --seal:#5e5ce6; --seal-ink:#c2c1ff;
+    --allow:#34d399; --deny:#f87171;
+    --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{background:var(--bg);-webkit-text-size-adjust:100%}
+  body{background:var(--bg);color:var(--ink);font:16px/1.6 var(--sans);
+    -webkit-font-smoothing:antialiased}
+  ::selection{background:rgba(94,92,230,.35)}
+  a{color:var(--seal-ink);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:860px;margin:0 auto;padding:0 24px}
+  .eyebrow{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--dim)}
+  .eyebrow .dot{display:inline-block;width:6px;height:6px;border-radius:99px;
+    background:var(--seal);margin-right:9px;vertical-align:1px}
+
+  header{border-bottom:1px solid var(--line);padding:20px 0}
+  header .wrap{display:flex;align-items:center;gap:20px}
+  .brand{font-weight:600;font-size:16px;letter-spacing:-.01em}
+  .brand b{color:var(--seal-ink)}
+  header nav{margin-left:auto;display:flex;gap:22px;font-size:14px}
+  header nav a{color:var(--dim)}
+  header nav a:hover{color:var(--ink);text-decoration:none}
+
+  .hero{padding:76px 0 8px}
+  h1{font-size:clamp(30px,5.2vw,46px);line-height:1.12;letter-spacing:-.025em;
+    font-weight:600;margin:18px 0 0;max-width:16ch}
+  h1 em{font-style:normal;color:var(--seal-ink)}
+  .lede{font-size:clamp(16px,2.2vw,18.5px);color:var(--dim);margin-top:20px;max-width:56ch}
+  .lede strong{color:var(--ink);font-weight:500}
+
+  .cta{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-top:32px}
+  .install{font-family:var(--mono);font-size:13.5px;background:var(--panel);
+    border:1px solid var(--line2);border-radius:6px;padding:12px 16px;color:var(--ink);
+    overflow-x:auto;white-space:nowrap;max-width:100%}
+  .install .p{color:var(--faint)}
+  .btn{display:inline-block;background:var(--seal);color:#fff;font-size:14px;font-weight:500;
+    border-radius:6px;padding:12px 20px;border:1px solid var(--seal)}
+  .btn:hover{text-decoration:none;filter:brightness(1.12)}
+  .btn.ghost{background:transparent;color:var(--ink);border-color:var(--line2)}
+  .meta{margin-top:18px;font-size:13.5px;color:var(--faint)}
+  .meta span{white-space:nowrap}
+  .meta i{font-style:normal;color:var(--line2);margin:0 10px}
+
+  figure{margin:52px 0 0}
+  figure img{width:100%;display:block;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+  figcaption{font-size:13px;color:var(--faint);margin-top:10px;text-align:center}
+
+  section{padding:72px 0 0}
+  h2{font-size:23px;letter-spacing:-.015em;font-weight:600;margin:14px 0 0}
+  .sub{color:var(--dim);margin-top:12px;max-width:60ch}
+
+  .problem p{color:var(--dim);margin-top:14px;max-width:62ch}
+  .problem p strong{color:var(--ink);font-weight:500}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:26px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:20px}
+  .card h3{font-size:15px;font-weight:600;margin-bottom:8px;letter-spacing:-.005em}
+  .card p{font-size:14.2px;color:var(--dim);line-height:1.55}
+  .card code{font-family:var(--mono);font-size:12.5px;color:var(--seal-ink);
+    background:var(--panel3);padding:1px 5px;border-radius:3px}
+
+  pre{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:18px 20px;margin-top:22px;overflow-x:auto}
+  pre code{font-family:var(--mono);font-size:13px;line-height:1.75;color:var(--ink);white-space:pre}
+  .c{color:var(--faint)}
+  .k{color:var(--seal-ink)}
+  .ok{color:var(--allow)}
+  .no{color:var(--deny)}
+
+  .honest{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--seal);
+    border-radius:8px;padding:24px 26px;margin-top:26px}
+  .honest p{color:var(--dim);margin-top:12px;font-size:15px}
+  .honest p:first-child{margin-top:0}
+
+  footer{margin-top:88px;border-top:1px solid var(--line);padding:32px 0 60px;
+    font-size:14px;color:var(--faint)}
+  footer .wrap{display:flex;flex-wrap:wrap;gap:10px 26px;align-items:center}
+  footer .sp{margin-left:auto}
+  @media(max-width:620px){
+    .hero{padding:52px 0 0} section{padding:56px 0 0}
+    footer .sp{margin-left:0;width:100%}
+  }
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <span class="brand">Chan<b>cery</b></span>
+  <nav>
+    <a href="https://github.com/chanceryhq/chancery#guides">Docs</a>
+    <a href="https://github.com/chanceryhq/chancery/tree/main/rfcs">RFCs</a>
+    <a href="https://github.com/chanceryhq/chancery/blob/main/SECURITY.md">Security</a>
+    <a href="https://github.com/chanceryhq/chancery">GitHub</a>
+  </nav>
+</div></header>
+
+<div class="wrap">
+
+  <div class="hero">
+    <div class="eyebrow"><span class="dot"></span>Open source · Apache-2.0 · Self-hosted</div>
+    <h1>The identity provider for <em>AI agents</em>.</h1>
+    <p class="lede">Your agents run on a shared API key, can't be stopped mid-task,
+      and write their own logs. Chancery gives them what every other privileged
+      identity already has: <strong>their own identity, scoped authority,
+      instant revocation, and an audit trail they can't write to.</strong></p>
+
+    <div class="cta">
+      <span class="install"><span class="p">$</span> brew install chanceryhq/tap/chancery</span>
+      <a class="btn" href="https://github.com/chanceryhq/chancery">View on GitHub</a>
+      <a class="btn ghost" href="https://github.com/chanceryhq/chancery/blob/main/QUICKSTART.md">5-min quickstart</a>
+    </div>
+
+    <p class="meta">
+      <span>Single Go binary</span><i>·</i>
+      <span>No cloud, no telemetry</span><i>·</i>
+      <span>105 tests, 19 locked RFCs</span><i>·</i>
+      <span>Signed releases + SBOM</span>
+    </p>
+  </div>
+
+  <figure>
+    <img src="assets/chancery-demo.gif"
+         alt="Terminal demo: granting a writ, an allowed tool call, revoking mid-task, the next call denied, and the tamper-evident audit trail verifying."
+         loading="lazy">
+    <figcaption>Grant → act → revoke mid-task → denied on the next call → verified audit trail. 60 seconds, end to end.</figcaption>
+  </figure>
+
+  <section class="problem">
+    <div class="eyebrow"><span class="dot"></span>The problem</div>
+    <h2>We give agents more standing power than we'd give a new engineer.</h2>
+    <p>Agents usually share one API key — so you can't revoke one without breaking
+      the rest, and you can't attribute an action to a specific agent.</p>
+    <p>A prompt injection isn't just bad output: it drives <strong>every tool the
+      agent can reach</strong>. And "revoking" an agent usually means waiting for a
+      token to expire, because nothing sits in the call path to stop the next action.</p>
+    <p>Worst of all, the logs are written by the agent — <strong>the exact component
+      you stopped trusting</strong> the moment it was compromised.</p>
+  </section>
+
+  <section>
+    <div class="eyebrow"><span class="dot"></span>What Chancery does</div>
+    <h2>Identity, authority, and evidence — enforced outside the agent.</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Real identities</h3>
+        <p>Every agent registers with an accountable human owner and gets its own
+          identity: agent → immutable version → revocable running instance. Change
+          the prompt and it's a new version — "did this change since review?" is a
+          hash comparison.</p>
+      </div>
+      <div class="card">
+        <h3>Authority that only narrows</h3>
+        <p>Authority is a <em>writ</em>: a signed chain where every delegation can
+          only add restrictions. A sub-agent structurally cannot escalate — the
+          block format has no field that could widen it.</p>
+      </div>
+      <div class="card">
+        <h3>Revocation on the next call</h3>
+        <p>The enforcement proxy re-reads live state on every tool call, so
+          <code>writ revoke</code> takes effect on the agent's next action — mid-session,
+          no restart, no waiting for a token to expire.</p>
+      </div>
+      <div class="card">
+        <h3>Agents never hold secrets</h3>
+        <p>Credentials are sealed and injected into the <em>tool server's</em>
+          environment at spawn — never into the agent's context. Prompt injection
+          can't exfiltrate what was never there.</p>
+      </div>
+      <div class="card">
+        <h3>The tools are verified too</h3>
+        <p>The first run pins your MCP server's code identity — image digest, whole
+          dependency tree, or binary hash — and refuses to start on drift.
+          <code>--confine</code> adds an egress allow-list and a read-only filesystem,
+          enforced by the OS.</p>
+      </div>
+      <div class="card">
+        <h3>Evidence, not logs</h3>
+        <p>Every decision is recorded by the gate, not the agent, in a hash-chained
+          trail that detects any edit or deletion. Metadata-only by schema: prompts
+          and payloads have nowhere to be stored.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow"><span class="dot"></span>In practice</div>
+    <h2>Wrap any MCP server. Nothing else changes.</h2>
+    <p class="sub">Chancery sits in the stdio path between the agent and the tool
+      server, so a prompt-injected agent can't talk its way around it.</p>
+<pre><code><span class="c"># give an agent a scoped, expiring grant</span>
+chancery writ grant --for user:you@acme.com --to deploy-bot \
+    --cap <span class="k">"call:github/get_*"</span> --ttl 8h
+
+<span class="c"># run the real server behind the gate, with a sealed token</span>
+chancery mcp wrap --agent deploy-bot --writ &lt;id&gt; \
+    --secret GITHUB_TOKEN=github-token -- npx @acme/github-mcp
+
+<span class="ok">  get_pull_request  → ALLOW</span>   <span class="c">forwarded, attributed, recorded</span>
+<span class="no">  delete_repo       → DENY</span>    <span class="c">never reaches the server</span>
+
+<span class="c"># kill it mid-task — the next call fails, not the next token</span>
+chancery writ revoke &lt;id&gt;</code></pre>
+  </section>
+
+  <section>
+    <div class="eyebrow"><span class="dot"></span>Honesty as a feature</div>
+    <h2>Every known gap is published.</h2>
+    <div class="honest">
+      <p>Chancery is a security product, so its own security posture is documented
+        rather than implied: a full threat model (STRIDE, OWASP LLM and Agentic Top
+        10 mappings, abuse cases) and a <strong>table of every known gap</strong> —
+        each with an owner and a phase.</p>
+      <p>Two promises: what ships open source stays Apache-2.0, no license flip ever;
+        and <strong>security is never paywalled</strong> — every gap in that table
+        closes in the open-source core.</p>
+      <p><a href="https://github.com/chanceryhq/chancery/blob/main/SECURITY.md">Read the gap table →</a>
+        &nbsp; <a href="https://github.com/chanceryhq/chancery/blob/main/rfcs/009-threat-model.md">Read the threat model →</a></p>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow"><span class="dot"></span>Built in the open</div>
+    <h2>19 design decisions, each argued before it was written.</h2>
+    <p class="sub">Chancery is built as a series of locked RFCs — the problem, the
+      alternatives considered, the decision, the trade-offs accepted, and the
+      failure modes. If you want to know why something works the way it does, the
+      argument is in the repo.</p>
+    <div class="cta">
+      <a class="btn ghost" href="https://github.com/chanceryhq/chancery/tree/main/rfcs">Read the RFCs</a>
+      <a class="btn ghost" href="https://github.com/chanceryhq/chancery/blob/main/docs/verify.md">Verify every claim yourself</a>
+    </div>
+  </section>
+
+</div>
+
+<footer><div class="wrap">
+  <span>Chancery — Apache-2.0</span>
+  <a href="https://github.com/chanceryhq/chancery">GitHub</a>
+  <a href="https://github.com/chanceryhq/chancery/blob/main/CHANGELOG.md">Changelog</a>
+  <a href="https://github.com/chanceryhq/chancery/issues">Issues</a>
+  <span class="sp">Running agents in production? Tell me where this breaks —
+    <a href="https://github.com/chanceryhq/chancery/issues/new">open an issue</a>.</span>
+</div></footer>
+
+</body>
+</html>

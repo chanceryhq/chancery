@@ -1,8 +1,9 @@
 # RFC-001: Agent Identity Model
 
-- **Status:** In Review
+- **Status:** Locked
 - **Author:** Aneesh Gupta
 - **Created:** 2026-07-04
+- **Locked:** 2026-07-20
 - **Depends on:** RFC-000
 - **Blocks:** RFC-002, RFC-003, RFC-005, RFC-006, RFC-007, RFC-008
 

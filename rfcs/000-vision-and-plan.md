@@ -1,8 +1,9 @@
 # RFC-000: Vision and Plan — Chancery, the Identity Provider for AI Agents
 
-- **Status:** In Review
+- **Status:** Locked
 - **Author:** Aneesh Gupta
 - **Created:** 2026-07-03
+- **Locked:** 2026-07-20
 - **Depends on:** —
 - **Blocks:** all subsequent RFCs
 

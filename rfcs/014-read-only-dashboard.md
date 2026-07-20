@@ -1,8 +1,9 @@
 # RFC-014: The Read-Only Dashboard
 
-- **Status:** In Review
+- **Status:** Locked
 - **Author:** Aneesh Gupta
 - **Created:** 2026-07-06
+- **Locked:** 2026-07-20
 - **Depends on:** RFC-006, RFC-008, RFC-011
 - **Blocks:** —
 

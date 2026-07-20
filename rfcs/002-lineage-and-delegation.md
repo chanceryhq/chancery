@@ -1,8 +1,9 @@
 # RFC-002: Lineage and Delegation — the Writ
 
-- **Status:** In Review
+- **Status:** Locked
 - **Author:** Aneesh Gupta
 - **Created:** 2026-07-04
+- **Locked:** 2026-07-20
 - **Depends on:** RFC-000, RFC-001
 - **Blocks:** RFC-004, RFC-006, RFC-007
 

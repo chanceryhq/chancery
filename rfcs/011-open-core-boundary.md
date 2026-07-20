@@ -1,8 +1,9 @@
 # RFC-011: Open-Core Boundary
 
-- **Status:** In Review
+- **Status:** Locked
 - **Author:** Aneesh Gupta
 - **Created:** 2026-07-04
+- **Locked:** 2026-07-20
 - **Depends on:** RFC-000 (D2), RFC-008, RFC-009, RFC-010
 - **Blocks:** enterprise-phase work
 

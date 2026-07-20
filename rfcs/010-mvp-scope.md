@@ -1,8 +1,9 @@
 # RFC-010: MVP Scope — the 90-Day Build
 
-- **Status:** In Review
+- **Status:** Locked
 - **Author:** Aneesh Gupta
 - **Created:** 2026-07-04
+- **Locked:** 2026-07-20
 - **Depends on:** RFC-000 … RFC-009
 - **Blocks:** launch
 

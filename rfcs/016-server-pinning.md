@@ -1,8 +1,9 @@
 # RFC-016: Server Pinning (Callee Trust)
 
-- **Status:** In Review
+- **Status:** Locked
 - **Author:** Aneesh Gupta
 - **Created:** 2026-07-16
+- **Locked:** 2026-07-20
 - **Depends on:** RFC-005, RFC-006
 - **Blocks:** —
 
