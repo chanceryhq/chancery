@@ -38,14 +38,14 @@
 <!-- ── hero ─────────────────────────────────────────── -->
 <div class="hero">
   <div class="wrap">
-    <div class="eyebrow rv">Open source · Apache-2.0 · Self-hosted</div>
-    <h1 class="rv" data-delay="60">The identity provider for <span class="g">AI agents</span>.</h1>
-    <p class="lede rv" data-delay="120">Your agents share one API key, can't be stopped mid-task,
+    <div class="eyebrow">Open source · Apache-2.0 · Self-hosted</div>
+    <h1>The identity provider for <span class="g">AI agents</span>.</h1>
+    <p class="lede">Your agents share one API key, can't be stopped mid-task,
       and write their own logs. Chancery gives them what every other privileged identity
       already has: <b>their own identity, authority that can only narrow, revocation that
       lands on the next call, and an audit trail they can't write to.</b></p>
 
-    <div class="cta rv" data-delay="180">
+    <div class="cta">
       <button class="copy" data-copy="brew install chanceryhq/tap/chancery" aria-label="Copy install command">
         <span class="p">$</span><code>brew install chanceryhq/tap/chancery</code>
         <span class="ico" aria-hidden="true">copy</span>
@@ -54,7 +54,7 @@
       <a class="btn ghost" href="https://github.com/chanceryhq/chancery/blob/main/QUICKSTART.md">5-min quickstart</a>
     </div>
 
-    <div class="stats rv" data-delay="240">
+    <div class="stats">
       <div class="stat"><div class="n">1</div><div class="l">Go binary</div></div>
       <div class="stat"><div class="n">19</div><div class="l">Locked RFCs</div></div>
       <div class="stat"><div class="n">105</div><div class="l">Tests</div></div>
@@ -62,7 +62,7 @@
     </div>
 
     <!-- terminal -->
-    <div class="term rv" data-delay="300">
+    <div class="term">
       <div class="term-bar"><i></i><i></i><i></i><span>deploy-bot — governed session</span></div>
       <!-- Static transcript: readable with scripting off; app.js replays it typed. -->
       <div class="term-body" id="term-body" aria-live="polite"><div class="cmd">chancery writ grant --to deploy-bot --cap "call:github/get_*" --ttl 8h</div><div class="dim">writ w_01K3MZQ4T8 · block b_01K3MZQ4TB · expires in 8h</div><br><div class="cmd">chancery mcp wrap --agent deploy-bot --writ w_01K3MZQ4T8 -- npx @acme/github-mcp</div><div class="dim">listening · tools/list filtered to the writ</div><br><div class="dim">  agent → github/get_pull_request</div><div class="ok">  ALLOW   forwarded · attributed · recorded</div><div class="dim">  agent → github/delete_repo</div><div class="no">  DENY    never reached the server</div><br><div class="cmd">chancery writ revoke w_01K3MZQ4T8</div><div class="dim">revoked — the delegation tree dies on the next call</div><br><div class="dim">  agent → github/get_pull_request</div><div class="no">  DENY    authority revoked · mid-session, no restart</div></div>
