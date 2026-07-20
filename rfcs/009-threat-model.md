@@ -147,6 +147,7 @@ phase. A threat model that hides its gaps is marketing.
 | G14 | Leases need server cooperation | Non-cooperating servers never verify; mid-flight revocation still commits there | RFC-015 · inherent (per-server opt-in) |
 | G15 | Intent checker sees arguments | Operator-chosen checker processes payloads (veto-only; cannot widen) | RFC-017 · inherent (documented; args never stored) |
 | G16 | Confinement is host-granular, platform-uneven | Exfil to an *allowed* host still possible; Linux egress is proxy-env cooperative until netns (FS is kernel-bounded); macOS bounds both | RFC-018 · v1 (Linux netns; argument schemas for narrower rules) |
+| G17 | Credential isolation is UID-bounded, not process-bounded | `/proc/<pid>/environ` of the spawned server is readable by same-UID processes and by ancestors under default `yama ptrace_scope=1` — which includes the agent runtime that spawned the wrap | Deployment guidance (separate OS user / ptrace_scope) · v1 |
 
 ## 6. What this means for RFC-010
 
