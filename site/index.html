@@ -225,6 +225,26 @@ chancery writ revoke &lt;id&gt;</code></pre>
   </section>
 
   <section>
+    <div class="eyebrow"><span class="dot"></span>See what happened</div>
+    <h2>A timeline written by the gate, not the agent.</h2>
+    <p class="sub">Chancery ships a read-only dashboard: the live audit timeline
+      with a permanent integrity badge, the agent roster with spawn provenance,
+      and the delegation tree rendered as a tree. Writes stay in the CLI — a
+      dashboard that can grant authority is a dashboard worth attacking.</p>
+    <figure>
+      <img src="assets/dashboard-audit.png" loading="lazy"
+           alt="Chancery dashboard: audit timeline in plain English with decisions and a live integrity badge.">
+      <figcaption>Every decision, attributed — with a hash-chain integrity badge that
+        turns red on any edit, deletion, or reorder.</figcaption>
+    </figure>
+    <figure>
+      <img src="assets/dashboard-writs.png" loading="lazy"
+           alt="Chancery dashboard: writs of authority rendered as a delegation tree.">
+      <figcaption>The delegation tree. Each block can only narrow what its parent held.</figcaption>
+    </figure>
+  </section>
+
+  <section>
     <div class="eyebrow"><span class="dot"></span>Honesty as a feature</div>
     <h2>Every known gap is published.</h2>
     <div class="honest">
