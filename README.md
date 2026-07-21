@@ -1,4 +1,5 @@
-<h1>Chancery</h1>
+<img src="brand/lockup-dark.png#gh-dark-mode-only" alt="Chancery" width="240">
+<img src="brand/lockup-light.png#gh-light-mode-only" alt="Chancery" width="240">
 
 **The identity provider for AI agents.** Every agent gets its own
 identity, authority that can only narrow when delegated, revocation
